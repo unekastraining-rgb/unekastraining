@@ -1,0 +1,3 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <rect x="16" y="16" width="32" height="32" rx="4" fill="#334155" stroke="#6366F1" stroke-width="2"/><path stroke="#6366F1" stroke-width="2" d="M24 10v6M32 10v6M40 10v6M24 48v6M32 48v6M40 48v6M10 24h6M10 32h6M10 40h6M48 24h6M48 32h6M48 40h6"/><rect x="24" y="24" width="16" height="16" rx="2" fill="#6366F1"/>
+</svg>

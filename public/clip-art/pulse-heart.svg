@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <style>
+    @keyframes pulse { 0%,100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.15); opacity: .85; } }
+    .h { animation: pulse 1s ease-in-out infinite; transform-origin: center; }
+  </style>
+  <path class="h" fill="#FB7185" stroke="#E11D48" stroke-width="2" d="M32 54S8 38 8 22c0-8 6-14 14-14 5 0 10 3 10 3s5-3 10-3c8 0 14 6 14 14 0 16-24 32-24 32z"/>
+</svg>

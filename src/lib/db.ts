@@ -21,7 +21,11 @@ function resolveSqliteUrl(): string {
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
+  prismaClientVersion?: number;
 };
+
+// Bump when Prisma schema adds models so dev hot-reload picks up a fresh client.
+const PRISMA_CLIENT_VERSION = 8;
 
 function createPrismaClient() {
   const adapter = new PrismaLibSql({
@@ -31,8 +35,27 @@ function createPrismaClient() {
   return new PrismaClient({ adapter });
 }
 
-export const db = globalForPrisma.prisma ?? createPrismaClient();
-
-if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.prisma = db;
+function isPrismaClientCurrent(client: PrismaClient | undefined): client is PrismaClient {
+  return Boolean(
+    client &&
+      globalForPrisma.prismaClientVersion === PRISMA_CLIENT_VERSION &&
+      typeof client.resource?.findMany === "function",
+  );
 }
+
+function getPrismaClient(): PrismaClient {
+  if (isPrismaClientCurrent(globalForPrisma.prisma)) {
+    return globalForPrisma.prisma;
+  }
+
+  const client = createPrismaClient();
+
+  if (process.env.NODE_ENV !== "production") {
+    globalForPrisma.prisma = client;
+    globalForPrisma.prismaClientVersion = PRISMA_CLIENT_VERSION;
+  }
+
+  return client;
+}
+
+export const db = getPrismaClient();

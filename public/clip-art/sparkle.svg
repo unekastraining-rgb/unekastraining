@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <style>
+    @keyframes twinkle { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .5; transform: scale(.85); } }
+    .a { animation: twinkle 1.2s ease-in-out infinite; transform-origin: center; }
+    .b { animation: twinkle 1.2s ease-in-out .4s infinite; transform-origin: center; }
+  </style>
+  <path class="a" fill="#C4B5FD" d="M32 6l4 12 12 4-12 4-4 12-4-12-12-4 12-4z"/>
+  <path class="b" fill="#F9A8D4" d="M50 38l2 6 6 2-6 2-2 6-2-6-6-2 6-2z"/>
+</svg>

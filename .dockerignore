@@ -1,0 +1,14 @@
+node_modules
+.next
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+dev.db
+dev.db-journal
+uploads
+coverage
+*.md
+.cursor
+.terminals

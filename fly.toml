@@ -1,0 +1,31 @@
+# Fly.io — personal cross-device hosting with persistent disk.
+# See DEPLOY.md for setup steps.
+
+app = 'studyhaul'
+primary_region = 'iad'
+
+[build]
+  dockerfile = 'Dockerfile'
+
+[env]
+  DATA_DIR = '/data'
+  DATABASE_URL = 'file:/data/dev.db'
+  AI_PROVIDER = 'gemini'
+  GEMINI_MODEL = 'gemini-3.6-flash'
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
+
+[[mounts]]
+  source = 'studyhaul_data'
+  destination = '/data'
+
+[[vm]]
+  memory = '512mb'
+  cpu_kind = 'shared'
+  cpus = 1

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <style>
+    @keyframes glow { 0%,100% { filter: drop-shadow(0 0 2px #FBBF24); } 50% { filter: drop-shadow(0 0 8px #F59E0B); } }
+    .g { animation: glow 1.2s ease-in-out infinite; }
+  </style>
+  <path class="g" fill="#FBBF24" stroke="#F59E0B" stroke-width="2" d="M32 6l6 14 14 2-10 10 2 14-12-8-12 8 2-14-10-10 14 2-14 6z"/>
+</svg>

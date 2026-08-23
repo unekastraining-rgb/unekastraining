@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 
-import { MaterialType } from "@/generated/prisma";
+import { AssignmentKind, MaterialType } from "@/generated/prisma";
 import { db } from "@/lib/db";
+import { parseMeetingScheduleFromText, upsertClassMeetings } from "@/lib/lms/meetings";
 import { getUploadFilePath } from "@/lib/syllabus/storage";
 import type { SaveCoursePayload } from "@/lib/syllabus/types";
 import { getOrCreateDefaultUser } from "@/lib/user";
@@ -13,6 +14,15 @@ function parseDueDate(value: string | null): Date | null {
 
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function inferAssignmentKind(title: string): AssignmentKind {
+  const lower = title.toLowerCase();
+  if (/\b(exam|midterm|final|test)\b/.test(lower)) return AssignmentKind.TEST;
+  if (/\bquiz\b/.test(lower)) return AssignmentKind.QUIZ;
+  if (/\b(project|portfolio)\b/.test(lower)) return AssignmentKind.PROJECT;
+  if (/\b(reading|chapter)\b/.test(lower)) return AssignmentKind.READING;
+  return AssignmentKind.ASSIGNMENT;
 }
 
 export async function POST(request: Request) {
@@ -50,6 +60,7 @@ export async function POST(request: Request) {
             title: assignment.title,
             description: assignment.description ?? null,
             dueDate: parseDueDate(assignment.dueDate),
+            kind: inferAssignmentKind(assignment.title),
           })),
         },
       },
@@ -59,7 +70,13 @@ export async function POST(request: Request) {
       },
     });
 
-    return NextResponse.json({ course }, { status: 201 });
+    const meetingCandidates = [
+      ...(extraction.meetings ?? []),
+      ...parseMeetingScheduleFromText(extractedText),
+    ];
+    const meetingsImported = await upsertClassMeetings(course.id, meetingCandidates);
+
+    return NextResponse.json({ course, meetingsImported }, { status: 201 });
   } catch (error) {
     console.error("Failed to save course:", error);
     return NextResponse.json(

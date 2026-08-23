@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <style>
+    @keyframes bounce { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+    .a { animation: bounce .6s ease-in-out infinite; }
+    .b { animation: bounce .6s ease-in-out .15s infinite; }
+    .c { animation: bounce .6s ease-in-out .3s infinite; }
+  </style>
+  <circle class="a" cx="16" cy="40" r="6" fill="#93C5FD"/>
+  <circle class="b" cx="32" cy="40" r="6" fill="#93C5FD"/>
+  <circle class="c" cx="48" cy="40" r="6" fill="#93C5FD"/>
+</svg>

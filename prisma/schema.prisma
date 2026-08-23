@@ -27,13 +27,87 @@ enum AssignmentStatus {
   OVERDUE
 }
 
+enum AssignmentKind {
+  ASSIGNMENT
+  TEST
+  QUIZ
+  PROJECT
+  READING
+  OTHER
+}
+
+enum LMSProvider {
+  BLACKBOARD
+  CANVAS
+  MOODLE
+  GOOGLE_CLASSROOM
+  OTHER
+}
+
+enum NoteMethod {
+  OUTLINE
+  CORNELL
+  BLANK
+  DOT_GRID
+  RULED
+  FLOW
+  CHARTING
+  QA
+  SKETCH
+  WHITEBOARD
+  MIND_MAP
+}
+
 enum StudyActivityType {
   READING
   FLASHCARDS
   NOTES_REVIEW
   PRACTICE
   ASSIGNMENT
+  QUIZ
+  SIX
+  LUCKY
+  BLURTING
+  TEACH_BACK
+  GRADE_SCHOOL
   GENERAL
+}
+
+enum QuizQuestionType {
+  MULTIPLE_CHOICE
+  MULTIPLE_RESPONSE
+  TRUE_FALSE
+  SHORT_ANSWER
+  SCENARIO
+}
+
+enum QuizSource {
+  AI_GENERATED
+  MANUAL
+  MISSED_RECYCLE
+}
+
+enum CalendarEventType {
+  ASSIGNMENT
+  EXAM
+  PROJECT
+  READING
+  STUDY_SESSION
+  CLASS
+  PERSONAL
+  OTHER
+}
+
+enum CalendarPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum ProposalStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }
 
 model User {
@@ -49,6 +123,92 @@ model User {
   topicMasteries TopicMastery[]
   flashcards     Flashcard[]
   studySessions  StudySession[]
+  preferences    UserPreferences?
+  lmsConnections LMSConnection[]
+  calendarEvents CalendarEvent[]
+  quizzes        Quiz[]
+  quizAttempts   QuizAttempt[]
+  missedQuestions MissedQuestion[]
+  scheduleProposals ScheduleProposal[]
+  materialInkPages MaterialInkPage[]
+  calendarConnections CalendarConnection[]
+  gradeSchoolProgress GradeSchoolStepProgress[]
+  collabBoards     CollabBoard[]
+  mediaAssets      UserMediaAsset[]
+  resources        Resource[]
+}
+
+model UserMediaAsset {
+  id           String   @id @default(cuid())
+  userId       String
+  name         String
+  kind         String   // template | background | sticker | palette_source
+  mimeType     String
+  filePath     String
+  category     String   @default("imported")
+  metadataJson String   @default("{}")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, kind])
+}
+
+model Resource {
+  id            String    @id @default(cuid())
+  userId        String
+  title         String
+  url           String
+  description   String?
+  category      String    @default("other")
+  tagsJson      String    @default("[]")
+  icon          String    @default("link")
+  accentColor   String?
+  openCount     Int       @default(0)
+  lastOpenedAt  DateTime?
+  sourceBatchId String?
+  metadataJson  String    @default("{}")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, category])
+  @@index([userId, sourceBatchId])
+}
+
+model UserPreferences {
+  id               String  @id @default(cuid())
+  userId           String  @unique
+  themeTemplate    String  @default("study-haul")
+  primaryColor     String?
+  backgroundColor  String?
+  accentColor      String?
+  elementaryMode   Boolean @default(false)
+  defaultQuickView String  @default("today")
+  settingsJson     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model LMSConnection {
+  id           String      @id @default(cuid())
+  userId       String
+  provider     LMSProvider
+  displayName  String?
+  baseUrl      String?
+  accessToken  String?
+  refreshToken String?
+  lastSyncedAt DateTime?
+  status       String      @default("disconnected")
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 model Course {
@@ -57,8 +217,14 @@ model Course {
   code        String?
   instructor  String?
   description String?
+  gradeLevel  String?
+  subject     String?
+  focusTopic  String?
   semester    String?
   color       String?  @default("#6366f1")
+  moodleCourseId     Int?
+  courseInfoSyncedAt DateTime?
+  courseInfoJson     String?
   userId      String
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -69,6 +235,11 @@ model Course {
   topics        Topic[]
   notes         Note[]
   studySessions StudySession[]
+  meetings      ClassMeeting[]
+  calendarEvents CalendarEvent[]
+  quizzes       Quiz[]
+  missedQuestions MissedQuestion[]
+  gradeSchoolProgress GradeSchoolStepProgress[]
 
   @@unique([userId, code])
   @@index([userId])
@@ -87,26 +258,138 @@ model CourseMaterial {
   updatedAt     DateTime     @updatedAt
 
   course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  notes  Note[]
+  inkPages MaterialInkPage[]
+
+  @@index([courseId])
+}
+
+model MaterialInkPage {
+  id          String   @id @default(cuid())
+  userId      String
+  materialId  String
+  pageNumber  Int      @default(1)
+  strokesJson String   @default("[]")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user     User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  material CourseMaterial @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, materialId, pageNumber])
+  @@index([userId])
+  @@index([materialId])
+}
+
+model CollabBoard {
+  id           String   @id @default(cuid())
+  userId       String
+  title        String   @default("Shared whiteboard")
+  shareCode    String   @unique
+  snapshotJson String   @default("{}")
+  noteId       String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([shareCode])
+}
+
+model ClassMeeting {
+  id        String   @id @default(cuid())
+  courseId  String
+  dayOfWeek Int
+  startTime String
+  endTime   String
+  location  String?
+  title     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
 
   @@index([courseId])
 }
 
 model Assignment {
-  id          String           @id @default(cuid())
-  title       String
-  description String?
-  dueDate     DateTime?
-  status      AssignmentStatus @default(NOT_STARTED)
-  grade       Float?
-  maxGrade    Float?
-  courseId    String
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+  id               String           @id @default(cuid())
+  title            String
+  description      String?
+  dueDate          DateTime?
+  scheduledStartAt DateTime?
+  scheduledEndAt   DateTime?
+  calendarColor    String?
+  kind             AssignmentKind   @default(ASSIGNMENT)
+  status           AssignmentStatus @default(NOT_STARTED)
+  grade            Float?
+  maxGrade         Float?
+  courseId         String
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
 
-  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  course        Course         @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  calendarEvent CalendarEvent?
 
   @@index([courseId])
   @@index([dueDate])
+  @@index([scheduledStartAt])
+}
+
+model CalendarEvent {
+  id           String             @id @default(cuid())
+  userId       String
+  courseId     String?
+  assignmentId String?            @unique
+  title        String
+  description  String?
+  startAt      DateTime
+  endAt        DateTime?
+  allDay       Boolean            @default(false)
+  eventType    CalendarEventType  @default(OTHER)
+  color        String?
+  priority     CalendarPriority   @default(MEDIUM)
+  recurrence   String?
+  reminderAt   DateTime?
+  completed    Boolean            @default(false)
+  location     String?
+  externalId   String?
+  externalSource String?
+  calendarConnectionId String?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course     Course?     @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  assignment Assignment? @relation(fields: [assignmentId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, externalSource, externalId])
+  @@index([userId])
+  @@index([courseId])
+  @@index([startAt])
+  @@index([endAt])
+}
+
+model CalendarConnection {
+  id                 String    @id @default(cuid())
+  userId             String
+  provider           String    @default("google")
+  externalCalendarId String
+  calendarName       String?
+  color              String?
+  accessToken        String?
+  refreshToken       String?
+  syncToken          String?
+  lastSyncedAt       DateTime?
+  status             String    @default("connected")
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider, externalCalendarId])
+  @@index([userId])
 }
 
 model Topic {
@@ -126,29 +409,36 @@ model Topic {
   masteries     TopicMastery[]
   flashcards    Flashcard[]
   studySessions StudySession[]
+  quizzes       Quiz[]
+  missedQuestions MissedQuestion[]
 
   @@index([courseId])
   @@index([parentId])
 }
 
 model Note {
-  id        String   @id @default(cuid())
-  title     String?
-  content   String
-  isPinned  Boolean  @default(false)
-  userId    String
-  courseId  String?
-  topicId   String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String      @id @default(cuid())
+  title       String?
+  content     String      @default("")
+  method      NoteMethod  @default(BLANK)
+  contentJson String?
+  materialId  String?
+  isPinned    Boolean     @default(false)
+  userId      String
+  courseId    String?
+  topicId     String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
 
-  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  course Course? @relation(fields: [courseId], references: [id], onDelete: SetNull)
-  topic  Topic?  @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  user     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course   Course?         @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  topic    Topic?          @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  material CourseMaterial? @relation(fields: [materialId], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@index([courseId])
   @@index([topicId])
+  @@index([materialId])
 }
 
 model TopicMastery {
@@ -157,6 +447,9 @@ model TopicMastery {
   topicId        String
   proficiency    Float     @default(0)
   confidence     Float     @default(0)
+  understanding  Float     @default(0)
+  recall         Float     @default(0)
+  application    Float     @default(0)
   reviewCount    Int       @default(0)
   lastReviewedAt DateTime?
   nextReviewAt   DateTime?
@@ -214,4 +507,138 @@ model StudySession {
   @@index([courseId])
   @@index([topicId])
   @@index([startedAt])
+}
+
+model GradeSchoolStepProgress {
+  id             String   @id @default(cuid())
+  userId         String
+  courseId       String
+  stepIndex      Int
+  completedAt    DateTime @default(now())
+  flashcardCount Int      @default(0)
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, courseId, stepIndex])
+  @@index([userId])
+  @@index([courseId])
+}
+
+model Quiz {
+  id               String     @id @default(cuid())
+  userId           String
+  courseId         String?
+  topicId          String?
+  title            String
+  description      String?
+  source           QuizSource @default(AI_GENERATED)
+  difficulty       String     @default("MEDIUM")
+  questionCount    Int        @default(0)
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course    Course?        @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  topic     Topic?         @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  questions QuizQuestion[]
+  attempts  QuizAttempt[]
+
+  @@index([userId])
+  @@index([courseId])
+  @@index([topicId])
+}
+
+model QuizQuestion {
+  id            String           @id @default(cuid())
+  quizId        String
+  sortOrder     Int              @default(0)
+  type          QuizQuestionType
+  prompt        String
+  options       String?
+  correctAnswer String
+  explanation   String?
+  topicId       String?
+
+  quiz      Quiz           @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  responses QuizResponse[]
+
+  @@index([quizId])
+}
+
+model QuizAttempt {
+  id          String    @id @default(cuid())
+  quizId      String
+  userId      String
+  score       Float?
+  maxScore    Float?
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  quiz      Quiz           @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  responses QuizResponse[]
+
+  @@index([quizId])
+  @@index([userId])
+}
+
+model QuizResponse {
+  id         String  @id @default(cuid())
+  attemptId  String
+  questionId String
+  answer     String
+  isCorrect  Boolean @default(false)
+  feedback   String?
+
+  attempt  QuizAttempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  question QuizQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@index([attemptId])
+  @@index([questionId])
+}
+
+model MissedQuestion {
+  id             String           @id @default(cuid())
+  userId         String
+  courseId       String?
+  topicId        String?
+  prompt         String
+  correctAnswer  String
+  userAnswer     String?
+  questionType   QuizQuestionType
+  options        String?
+  explanation    String?
+  sourceQuizId   String?
+  recycleCount   Int              @default(0)
+  nextReviewAt   DateTime?
+  mastered       Boolean          @default(false)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course Course? @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  topic  Topic?  @relation(fields: [topicId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([courseId])
+  @@index([topicId])
+  @@index([nextReviewAt])
+  @@index([mastered])
+}
+
+model ScheduleProposal {
+  id          String         @id @default(cuid())
+  userId      String
+  title       String
+  description String?
+  changesJson String
+  status      ProposalStatus @default(PENDING)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
 }

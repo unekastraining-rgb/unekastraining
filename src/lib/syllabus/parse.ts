@@ -1,6 +1,13 @@
 import { aiService } from "@/lib/ai";
+import { isAIConfigured } from "@/lib/ai/is-configured";
 
+import {
+  mergeSyllabusExtractions,
+  parseSyllabusHeuristic,
+} from "./parse-heuristic";
 import type { SyllabusExtraction } from "./types";
+
+export type SyllabusParserMode = "heuristic" | "ai" | "hybrid";
 
 const EXTRACTION_PROMPT = `You are an academic syllabus parser. Extract structured course information from the syllabus text below.
 
@@ -16,11 +23,22 @@ Return ONLY valid JSON matching this exact shape (no markdown, no commentary):
       "dueDate": "ISO 8601 date string or null",
       "description": "string or null"
     }
+  ],
+  "meetings": [
+    {
+      "dayOfWeek": 0,
+      "startTime": "HH:MM",
+      "endTime": "HH:MM",
+      "location": "string or null",
+      "title": "string or null"
+    }
   ]
 }
 
 Rules:
 - Include exams, homework, projects, quizzes, and major deadlines in assignments.
+- Include regular class meeting times in meetings when listed (dayOfWeek: 0=Sunday … 6=Saturday).
+- Use 24-hour HH:MM for meeting times.
 - Use null when a field is not found.
 - Normalize due dates to ISO 8601 (YYYY-MM-DD) when possible.
 - If only a month/day is given, infer the year from the semester when possible.
@@ -48,14 +66,17 @@ function parseJsonFromResponse(content: string): SyllabusExtraction {
       dueDate: assignment.dueDate ?? null,
       description: assignment.description ?? null,
     })),
+    meetings: (parsed.meetings ?? []).map((meeting) => ({
+      dayOfWeek: meeting.dayOfWeek,
+      startTime: meeting.startTime,
+      endTime: meeting.endTime,
+      location: meeting.location ?? null,
+      title: meeting.title ?? "Class",
+    })),
   };
 }
 
-export async function parseSyllabusText(text: string): Promise<SyllabusExtraction> {
-  if (!text.trim()) {
-    throw new Error("No text could be extracted from the uploaded file.");
-  }
-
+async function parseSyllabusWithAI(text: string): Promise<SyllabusExtraction> {
   const result = await aiService.complete(
     [
       {
@@ -71,8 +92,35 @@ export async function parseSyllabusText(text: string): Promise<SyllabusExtractio
     {
       temperature: 0.1,
       maxTokens: 2048,
+      jsonMode: true,
     },
   );
 
   return parseJsonFromResponse(result.content);
+}
+
+export async function parseSyllabusText(
+  text: string,
+  options?: { fileName?: string; preferAI?: boolean },
+): Promise<{ extraction: SyllabusExtraction; parser: SyllabusParserMode }> {
+  const heuristic = parseSyllabusHeuristic(text, options?.fileName);
+
+  if (!text.trim()) {
+    return { extraction: heuristic, parser: "heuristic" };
+  }
+
+  if (!isAIConfigured() || options?.preferAI === false) {
+    return { extraction: heuristic, parser: "heuristic" };
+  }
+
+  try {
+    const aiExtraction = await parseSyllabusWithAI(text);
+    return {
+      extraction: mergeSyllabusExtractions(heuristic, aiExtraction),
+      parser: "hybrid",
+    };
+  } catch (error) {
+    console.warn("AI syllabus parse failed; using heuristic extraction.", error);
+    return { extraction: heuristic, parser: "heuristic" };
+  }
 }

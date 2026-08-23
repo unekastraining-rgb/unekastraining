@@ -13,7 +13,8 @@ import {
 } from "@/lib/customization/apply-palette";
 import { getOrCreateUserPreferences } from "@/lib/preferences";
 import { resolveThemeColors } from "@/lib/theme/templates";
-import { getOrCreateDefaultUser } from "@/lib/user";
+import { DEFAULT_THEME_SETTINGS } from "@/lib/theme/types";
+import { getCurrentUser } from "@/lib/user";
 
 const plusJakarta = Plus_Jakarta_Sans({
   variable: "--font-plus-jakarta",
@@ -38,8 +39,10 @@ export const viewport = {
 };
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {
-  const user = await getOrCreateDefaultUser();
-  const preferences = await getOrCreateUserPreferences(user.id);
+  const user = await getCurrentUser();
+  const preferences = user
+    ? await getOrCreateUserPreferences(user.id)
+    : DEFAULT_THEME_SETTINGS;
   const themeVars = computeThemeCssVariables(
     resolveThemeColors(preferences),
     reconstructPaletteFromSettings(preferences),

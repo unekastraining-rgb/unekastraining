@@ -2,7 +2,9 @@ import { mkdir, writeFile } from "fs/promises";
 import path from "path";
 import { randomUUID } from "crypto";
 
-const UPLOAD_DIR = path.join(process.cwd(), "uploads", "syllabi");
+import { uploadsDir } from "@/lib/data-dir";
+
+const UPLOAD_DIR = uploadsDir("syllabi");
 
 export async function saveUploadedFile(
   buffer: Buffer,

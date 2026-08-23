@@ -1,6 +1,7 @@
 import mammoth from "mammoth";
 import { PDFParse } from "pdf-parse";
-import OpenAI from "openai";
+
+import { getVisionExtractor } from "@/lib/ai/service";
 
 const IMAGE_MIME_TYPES = new Set([
   "image/jpeg",
@@ -9,6 +10,16 @@ const IMAGE_MIME_TYPES = new Set([
   "image/webp",
   "image/gif",
 ]);
+
+export function fileNeedsVisionOcr(mimeType: string, fileName: string): boolean {
+  const lowerName = fileName.toLowerCase();
+  return (
+    IMAGE_MIME_TYPES.has(mimeType) || /\.(jpe?g|png|webp|gif)$/i.test(lowerName)
+  );
+}
+
+const IMAGE_EXTRACTION_PROMPT =
+  "Extract all readable text from this syllabus document image. Return only the extracted text with no commentary.";
 
 async function extractPdfText(buffer: Buffer): Promise<string> {
   const parser = new PDFParse({ data: buffer });
@@ -23,44 +34,16 @@ async function extractDocxText(buffer: Buffer): Promise<string> {
 }
 
 async function extractImageText(buffer: Buffer, mimeType: string): Promise<string> {
-  const apiKey = process.env.OPENAI_API_KEY;
-
-  if (!apiKey) {
-    throw new Error("OPENAI_API_KEY is required to extract text from images.");
-  }
-
-  const client = new OpenAI({ apiKey });
+  const vision = getVisionExtractor();
   const base64 = buffer.toString("base64");
 
-  const response = await client.chat.completions.create({
-    model: "gpt-4o-mini",
-    messages: [
-      {
-        role: "user",
-        content: [
-          {
-            type: "text",
-            text: "Extract all readable text from this syllabus document image. Return only the extracted text with no commentary.",
-          },
-          {
-            type: "image_url",
-            image_url: {
-              url: `data:${mimeType};base64,${base64}`,
-            },
-          },
-        ],
-      },
-    ],
-    max_tokens: 4096,
-  });
-
-  const content = response.choices[0]?.message?.content;
-
-  if (!content) {
-    throw new Error("Could not extract text from the uploaded image.");
+  if (vision.provider === "gemini") {
+    return vision.extract(IMAGE_EXTRACTION_PROMPT, base64, mimeType);
   }
 
-  return content.trim();
+  throw new Error(
+    "Image syllabi need AI for text extraction. Upload a PDF or DOCX for offline parsing, or add GEMINI_API_KEY for image OCR.",
+  );
 }
 
 export async function extractTextFromFile(

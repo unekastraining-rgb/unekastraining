@@ -18,6 +18,7 @@ import { useTheme } from "@/lib/theme/ThemeProvider";
 import type { ThemeTemplateId } from "@/lib/theme/types";
 import { PaletteLibrary } from "@/components/customization/PaletteLibrary";
 import { ColorPicker } from "@/components/customization/ColorPicker";
+import { syncMoodleFromBrowser } from "@/lib/lms/moodle-browser-sync";
 
 export function SettingsPanel() {
   const router = useRouter();
@@ -27,6 +28,8 @@ export function SettingsPanel() {
   const [selectedProvider, setSelectedProvider] = useState(LMS_PROVIDERS[0].id);
   const [lmsMessage, setLmsMessage] = useState<string | null>(null);
   const [testingBlackboard, setTestingBlackboard] = useState(false);
+  const [testingMoodle, setTestingMoodle] = useState(false);
+  const [syncingMoodle, setSyncingMoodle] = useState(false);
   const [appSettings, setAppSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
   const [savingAi, setSavingAi] = useState(false);
   const [connections, setConnections] = useState<
@@ -63,6 +66,19 @@ export function SettingsPanel() {
         if (data.success) setConnections(data.connections);
       })
       .catch(() => {});
+
+    void fetch("/api/lms/moodle/credentials")
+      .then((response) => response.json())
+      .then((data) => {
+        if (!data.success) return;
+        setSelectedProvider("MOODLE");
+        setLmsUrl(data.baseUrl ?? "");
+        setLmsToken(data.accessToken ?? "");
+        if (data.source === "env") {
+          setLmsMessage("Using Moodle credentials from .env — click Sync from this device to import.");
+        }
+      })
+      .catch(() => {});
   }, []);
 
   async function connectLms() {
@@ -83,10 +99,18 @@ export function SettingsPanel() {
         data.connection,
         ...current.filter((item) => item.provider !== data.connection.provider),
       ]);
+      if (selectedProvider === "MOODLE" && (lmsUrl.trim() || lmsToken.trim())) {
+        await syncMoodleBrowser();
+      }
     }
   }
 
   async function syncLms(provider: string, demo = false) {
+    if (provider === "MOODLE" && !demo) {
+      await syncMoodleBrowser();
+      return;
+    }
+
     const response = await fetch("/api/lms/sync", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -95,6 +119,92 @@ export function SettingsPanel() {
     const data = await response.json();
     setLmsMessage(data.result?.message ?? data.error ?? "Sync finished.");
     if (data.success) router.refresh();
+  }
+
+  async function syncMoodleBrowser() {
+    setSyncingMoodle(true);
+    setLmsMessage(null);
+    try {
+      let baseUrl = lmsUrl.trim();
+      let token = lmsToken.trim();
+
+      if (!baseUrl || !token) {
+        const credResponse = await fetch("/api/lms/moodle/credentials");
+        const credData = await credResponse.json();
+        if (!credData.success) {
+          setLmsMessage(credData.error ?? "Enter your Moodle site URL and token first.");
+          return;
+        }
+        baseUrl = credData.baseUrl;
+        token = credData.accessToken;
+      }
+
+      const result = await syncMoodleFromBrowser(baseUrl, token);
+      setLmsMessage(result.message);
+      router.refresh();
+    } catch (error) {
+      setLmsMessage(
+        error instanceof Error ? error.message : "Moodle sync failed from this device.",
+      );
+    } finally {
+      setSyncingMoodle(false);
+    }
+  }
+
+  async function disconnectLms(provider: string) {
+    if (
+      !window.confirm(
+        `Disconnect ${provider.replace(/_/g, " ")}? Your imported courses and assignments will stay in Study Haul.`,
+      )
+    ) {
+      return;
+    }
+
+    setLmsMessage(null);
+    const response = await fetch("/api/lms/connect", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider }),
+    });
+    const data = await response.json();
+    setLmsMessage(data.message ?? data.error ?? "Disconnected.");
+    if (data.success) {
+      setConnections((current) => current.filter((item) => item.provider !== provider));
+      if (selectedProvider === provider) {
+        setLmsUrl("");
+        setLmsToken("");
+      }
+    }
+  }
+
+  async function testMoodleConnection() {
+    setTestingMoodle(true);
+    setLmsMessage(null);
+    try {
+      const response = await fetch("/api/lms/moodle/diagnose", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          baseUrl: lmsUrl || undefined,
+          accessToken: lmsToken || undefined,
+        }),
+      });
+      const data = await response.json();
+      if (!data.success && !data.report) {
+        setLmsMessage(data.error ?? "Moodle test failed.");
+        return;
+      }
+
+      const lines = (data.report?.steps ?? []).map(
+        (step: { ok: boolean; label: string; detail?: string }) =>
+          `${step.ok ? "✓" : "✗"} ${step.label}${step.detail ? ` — ${step.detail}` : ""}`,
+      );
+      setLmsMessage([data.report?.summary, ...lines].filter(Boolean).join("\n"));
+    } catch {
+      setLmsMessage("Moodle test failed — check your URL and token.");
+    } finally {
+      setTestingMoodle(false);
+    }
   }
 
   async function testBlackboardConnection() {
@@ -431,16 +541,34 @@ export function SettingsPanel() {
           <input
             value={lmsUrl}
             onChange={(event) => setLmsUrl(event.target.value)}
-            placeholder="LMS site URL (e.g. https://yourschool.instructure.com)"
+            placeholder={
+              selectedProvider === "MOODLE"
+                ? "Moodle site root (e.g. https://moodle.lsua.edu)"
+                : "LMS site URL (e.g. https://yourschool.instructure.com)"
+            }
             className="rounded-xl border border-brand px-4 py-3 text-sm"
           />
           <input
             value={lmsToken}
             onChange={(event) => setLmsToken(event.target.value)}
-            placeholder="API token (optional for now)"
+            placeholder={
+              selectedProvider === "MOODLE"
+                ? "Web Services token (from Security keys / Manage tokens)"
+                : "API token (optional for now)"
+            }
             className="rounded-xl border border-brand px-4 py-3 text-sm"
           />
         </div>
+
+        {selectedProvider === "MOODLE" ? (
+          <p className="mt-2 text-xs leading-relaxed text-stone-500">
+            Use only your Moodle <strong>site address</strong> (e.g.{" "}
+            <code className="rounded bg-stone-100 px-1">https://moodle.lsua.edu</code>), not the
+            token page URL. Create a token at{" "}
+            <code className="rounded bg-stone-100 px-1">/user/managetoken.php</code>, then paste
+            the token here — not the page link. Tokens are exactly 32 characters (letters and numbers).
+          </p>
+        ) : null}
 
         <div className="mt-4 flex flex-wrap gap-3">
           <button
@@ -469,7 +597,10 @@ export function SettingsPanel() {
           ) : null}
           {selectedProvider === "MOODLE" ? (
             <p className="w-full text-xs text-stone-500">
-              Moodle uses a Web Services token — paste your site URL and token above, then Sync.
+              Moodle sync runs from <strong>this device</strong> (your browser talks to Moodle
+              directly). Credentials can come from <code className="rounded bg-stone-100 px-1">.env</code>{" "}
+              (<code className="rounded bg-stone-100 px-1">MOODLE_URL</code>,{" "}
+              <code className="rounded bg-stone-100 px-1">MOODLE_TOKEN</code>) or Settings below.
             </p>
           ) : null}
           {selectedProvider === "GOOGLE_CLASSROOM" ? (
@@ -483,11 +614,22 @@ export function SettingsPanel() {
           <button
             type="button"
             onClick={() => void syncLms(selectedProvider)}
-            className="inline-flex items-center gap-2 rounded-xl border border-violet-200 px-5 py-2.5 text-sm font-semibold text-violet-700"
+            disabled={selectedProvider === "MOODLE" && syncingMoodle}
+            className="inline-flex items-center gap-2 rounded-xl border border-violet-200 px-5 py-2.5 text-sm font-semibold text-violet-700 disabled:opacity-60"
           >
-            <RefreshCw className="h-4 w-4" />
-            Sync now
+            <RefreshCw className={`h-4 w-4 ${syncingMoodle && selectedProvider === "MOODLE" ? "animate-spin" : ""}`} />
+            {selectedProvider === "MOODLE" ? "Sync from this device" : "Sync now"}
           </button>
+          {selectedProvider === "MOODLE" ? (
+            <button
+              type="button"
+              onClick={() => void testMoodleConnection()}
+              disabled={testingMoodle}
+              className="rounded-xl border border-violet-200 px-5 py-2.5 text-sm font-semibold text-violet-700 disabled:opacity-60"
+            >
+              {testingMoodle ? "Testing…" : "Test Moodle connection"}
+            </button>
+          ) : null}
           {selectedProvider === "BLACKBOARD" ? (
             <button
               type="button"
@@ -518,11 +660,11 @@ export function SettingsPanel() {
             {connections.map((connection) => (
               <div
                 key={connection.id}
-                className="flex items-center justify-between rounded-xl border border-brand px-4 py-3 text-sm"
+                className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-brand px-4 py-3 text-sm"
               >
-                <div>
+                <div className="min-w-0 flex-1">
                   <p className="font-semibold text-stone-900">{connection.provider}</p>
-                  <p className="text-stone-500">{connection.baseUrl ?? "No URL yet"}</p>
+                  <p className="truncate text-stone-500">{connection.baseUrl ?? "No URL yet"}</p>
                   {connection.lastSyncedAt ? (
                     <p className="text-xs text-stone-400">
                       Last synced{" "}
@@ -530,9 +672,18 @@ export function SettingsPanel() {
                     </p>
                   ) : null}
                 </div>
-                <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700">
-                  {connection.status}
-                </span>
+                <div className="flex shrink-0 items-center gap-2">
+                  <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700">
+                    {connection.status}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void disconnectLms(connection.provider)}
+                    className="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50"
+                  >
+                    Disconnect
+                  </button>
+                </div>
               </div>
             ))}
           </div>

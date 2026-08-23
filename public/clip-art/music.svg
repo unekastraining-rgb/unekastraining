@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <style>
+    @keyframes bounce { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+    .n1 { animation: bounce .8s ease-in-out infinite; }
+    .n2 { animation: bounce .8s ease-in-out .2s infinite; }
+    .n3 { animation: bounce .8s ease-in-out .4s infinite; }
+  </style>
+  <path fill="#67E8F9" stroke="#0891B2" stroke-width="2" d="M24 8v36c0 4-3 7-7 7s-7-3-7-7 3-7 7-7c2 0 4 1 5 2V8h28v36c0 4-3 7-7 7s-7-3-7-7 3-7 7-7c2 0 4 1 5 2V8H24z"/>
+  <circle class="n1" cx="17" cy="44" r="7" fill="#22D3EE"/>
+  <circle class="n2" cx="47" cy="44" r="7" fill="#22D3EE"/>
+</svg>

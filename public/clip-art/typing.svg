@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <style>
+    @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+    .c { animation: blink 1s step-end infinite; }
+  </style>
+  <rect x="12" y="14" width="40" height="36" rx="4" fill="#F8FAFC" stroke="#64748B" stroke-width="2"/>
+  <path stroke="#334155" stroke-width="2" d="M18 24h28M18 32h20"/>
+  <rect class="c" x="38" y="30" width="3" height="10" fill="#6366F1"/>
+</svg>

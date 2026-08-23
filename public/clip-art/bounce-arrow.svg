@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <style>
+    @keyframes bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(4px); } }
+    .a { animation: bob .8s ease-in-out infinite; }
+  </style>
+  <path class="a" fill="#93C5FD" stroke="#2563EB" stroke-width="2" d="M8 32h36l18 16H8V32z"/>
+  <path fill="#2563EB" d="M44 32l12-8v24l-12-8V32z"/>
+</svg>

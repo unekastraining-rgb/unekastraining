@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <style>
+    @keyframes shake { 0%,100% { transform: rotate(0deg); } 25% { transform: rotate(-12deg); } 75% { transform: rotate(12deg); } }
+    .b { animation: shake .5s ease-in-out infinite; transform-origin: 32px 28px; }
+  </style>
+  <path class="b" fill="#FDE047" stroke="#CA8A04" stroke-width="2" d="M32 8c-2 0-4 2-4 4v2c-8 2-12 10-12 18 0 10 7 18 16 18s16-8 16-18c0-8-4-16-12-18v-2c0-2-2-4-4-4z"/>
+  <circle cx="32" cy="46" r="3" fill="#854D0E"/>
+  <path fill="#854D0E" d="M28 8h8v4h-8z"/>
+</svg>

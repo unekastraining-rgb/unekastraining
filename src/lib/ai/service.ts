@@ -1,4 +1,8 @@
-import { OpenAIProvider } from "./providers/openai";
+import { AIProviderChainExhaustedError } from "./errors";
+import { getAIProviderChain } from "./config";
+import { FallbackAIService } from "./fallback";
+import { buildConfiguredAIProviders } from "./provider-factory";
+import { GeminiProvider } from "./providers/gemini";
 import type {
   AICompletionOptions,
   AICompletionResult,
@@ -30,7 +34,12 @@ export class AIService {
 
   private getProvider(): AIServiceProvider {
     if (!this.provider) {
-      this.provider = new OpenAIProvider();
+      const chain = buildConfiguredAIProviders(getAIProviderChain());
+      if (chain.length === 0) {
+        throw new AIProviderChainExhaustedError([]);
+      }
+      this.provider =
+        chain.length === 1 ? chain[0]! : new FallbackAIService(chain);
     }
 
     return this.provider;
@@ -38,3 +47,18 @@ export class AIService {
 }
 
 export const aiService = new AIService();
+
+export function getVisionExtractor():
+  | { provider: "gemini"; extract: GeminiProvider["completeWithImage"] }
+  | { provider: "none" }
+{
+  const gemini = buildConfiguredAIProviders(["gemini"])[0];
+  if (gemini instanceof GeminiProvider) {
+    return {
+      provider: "gemini",
+      extract: gemini.completeWithImage.bind(gemini),
+    };
+  }
+
+  return { provider: "none" };
+}

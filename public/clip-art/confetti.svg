@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <style>
+    @keyframes float { 0%,100% { transform: translateY(0); opacity: 1; } 50% { transform: translateY(-8px); opacity: .6; } }
+    .s1 { animation: float 1.4s ease-in-out infinite; }
+    .s2 { animation: float 1.4s ease-in-out .3s infinite; }
+    .s3 { animation: float 1.4s ease-in-out .6s infinite; }
+  </style>
+  <path class="s1" fill="#FDE68A" d="M10 40l6-12 6 12z"/>
+  <path class="s2" fill="#C4B5FD" d="M26 38l6-10 6 10z"/>
+  <path class="s3" fill="#F9A8D4" d="M42 42l6-14 6 14z"/>
+</svg>

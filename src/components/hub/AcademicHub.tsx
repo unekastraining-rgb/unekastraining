@@ -18,6 +18,7 @@ import { LockerTab } from "./LockerTab";
 import { SettingsPanel } from "./settings/SettingsPanel";
 import { SidebarNav } from "./SidebarNav";
 import type { HubData, HubTab } from "./types";
+import type { PlanningNavActive } from "./planning-nav-types";
 import { DEFAULT_APP_SETTINGS } from "@/lib/settings/app-settings";
 
 export function AcademicHub({
@@ -70,9 +71,7 @@ function AcademicHubContent({
   );
   const [chatPrompt, setChatPrompt] = useState<string | null>(null);
   const [chatCourseId, setChatCourseId] = useState<string | null>(null);
-  const [planningActive, setPlanningActive] = useState<
-    "hub" | "core" | "calendar" | "study"
-  >("hub");
+  const [planningActive, setPlanningActive] = useState<PlanningNavActive>("hub");
 
   const handleTabChange = useCallback(
     (tab: HubTab) => {
@@ -134,7 +133,7 @@ function AcademicHubContent({
 
   return (
     <div
-      className="relative min-h-screen overflow-x-clip pb-24 md:pb-8"
+      className="relative min-h-screen overflow-x-clip pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-8"
       style={{
         background: "var(--sh-gradient, var(--sh-background, #fff8f1))",
         color: "var(--sh-text-heading, #1c1917)",

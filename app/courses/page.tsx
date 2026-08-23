@@ -1,3 +1,4 @@
+import { HubBackBar } from "@/components/hub/HubBackBar";
 import { db } from "@/lib/db";
 import { getOrCreateDefaultUser } from "@/lib/user";
 
@@ -18,5 +19,10 @@ export default async function CoursesPage() {
     },
   });
 
-  return <CoursesView initialCourses={courses} />;
+  return (
+    <>
+      <HubBackBar title="Add class / Scan syllabus" />
+      <CoursesView initialCourses={courses} />
+    </>
+  );
 }

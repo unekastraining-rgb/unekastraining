@@ -9,6 +9,8 @@ export interface AICompletionOptions {
   model?: string;
   temperature?: number;
   maxTokens?: number;
+  /** Ask the provider to return strict JSON when supported. */
+  jsonMode?: boolean;
 }
 
 export interface AIUsage {
@@ -20,6 +22,7 @@ export interface AIUsage {
 export interface AICompletionResult {
   content: string;
   model: string;
+  provider?: string;
   usage?: AIUsage;
 }
 
