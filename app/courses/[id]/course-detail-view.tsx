@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 
 import { CourseProgressStory } from "@/components/courses/CourseProgressStory";
+import { CourseHeadlines } from "@/components/courses/CourseHeadlines";
 import { CourseInfoView } from "@/components/courses/CourseInfoView";
 import { MaterialOpenActions } from "@/components/materials/MaterialOpenActions";
 import { BreakDownButton } from "@/components/study/BreakDownButton";
@@ -40,6 +41,7 @@ interface CourseDetail {
   gradeLevel: string | null;
   subject: string | null;
   moodleCourseId: number | null;
+  courseInfoJson: string | null;
   quizCount: number;
   sessionCount: number;
   assignments: Array<{
@@ -138,8 +140,9 @@ export function CourseDetailView({
   const [activeTab, setActiveTab] = useState<"overview" | "course-info">("overview");
 
   useEffect(() => {
-    if (searchParams.get("tab") === "course-info") {
-      setActiveTab("course-info");
+    const tab = searchParams.get("tab");
+    if (tab === "course-info" || tab === "overview") {
+      setActiveTab(tab);
     }
   }, [searchParams]);
 
@@ -193,7 +196,7 @@ export function CourseDetailView({
                 .filter(Boolean)
                 .join(" · ") || "No details yet"}
             </p>
-            {course.description ? (
+            {course.description && !course.moodleCourseId && !course.courseInfoJson ? (
               <p className="mt-4 max-w-2xl text-sm leading-relaxed text-stone-600">
                 {course.description}
               </p>
@@ -259,6 +262,18 @@ export function CourseDetailView({
           </div>
         </header>
 
+        <CourseHeadlines
+          courseInfoJson={course.courseInfoJson}
+          assignments={course.assignments}
+          instructor={course.instructor}
+          accentColor={course.color}
+          onViewFullSyllabus={
+            course.moodleCourseId || course.courseInfoJson
+              ? () => setActiveTab("course-info")
+              : undefined
+          }
+        />
+
         <div className="flex gap-2 border-b border-orange-100">
           <button
             type="button"
@@ -280,7 +295,7 @@ export function CourseDetailView({
                 : "text-stone-500 hover:text-stone-800"
             }`}
           >
-            Course Info
+            Full syllabus
           </button>
         </div>
 

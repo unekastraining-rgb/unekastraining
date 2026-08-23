@@ -8,6 +8,7 @@ import type { MoodleCourseContentModule, MoodleCourseContentSection } from "@/li
 import { normalizeMoodleBaseUrl } from "@/lib/lms/moodle-url";
 import {
   fetchMoodlePagesByCourse,
+  parseBookChapterFileUrls,
 } from "@/lib/lms/moodle-syllabus";
 
 import { fetchPluginFileText, htmlToPlainText, unixToIso } from "./html";
@@ -102,31 +103,13 @@ function addItem(
 }
 
 function parseBookStructure(mod: MoodleCourseContentModule): BookChapter[] {
-  const structure = mod.contents?.find((item) => item.filename === "structure");
-  if (!structure?.content) return [];
-
-  try {
-    const nodes = JSON.parse(structure.content) as Array<{
-      title?: string;
-      href?: string;
-      level?: number;
-      subitems?: unknown[];
-    }>;
-
-    const htmlFiles = (mod.contents ?? []).filter(
-      (item) => item.type === "file" && item.filename === "index.html" && item.fileurl,
-    );
-
-    return nodes.map((node, index) => ({
-      title: (node.title ?? "").replace(/&amp;/g, "&").trim(),
-      href: node.href ?? "",
-      level: node.level ?? 0,
-      body: "",
-      _fileUrl: htmlFiles[index]?.fileurl ?? htmlFiles.find((f) => f.filepath?.includes(node.href?.split("/")[0] ?? "XXXX"))?.fileurl,
-    })) as Array<BookChapter & { _fileUrl?: string | null }>;
-  } catch {
-    return [];
-  }
+  return parseBookChapterFileUrls(mod).map((chapter) => ({
+    title: chapter.title,
+    href: "",
+    level: 0,
+    body: "",
+    _fileUrl: chapter.fileUrl,
+  })) as Array<BookChapter & { _fileUrl?: string | null }>;
 }
 
 async function loadBookChapters(

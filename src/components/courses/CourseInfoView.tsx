@@ -31,6 +31,10 @@ function SectionCard({ section }: { section: CourseInfoSection }) {
               <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-stone-600">
                 {item.body}
               </p>
+            ) : item.source.url ? (
+              <p className="mt-2 text-sm text-stone-500">
+                Open in Moodle for the full content.
+              </p>
             ) : null}
             <p className="mt-2 text-xs text-stone-400">
               Source: {item.source.label}

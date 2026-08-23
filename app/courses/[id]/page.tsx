@@ -59,6 +59,7 @@ export default async function CourseDetailPage({
           gradeLevel: course.gradeLevel,
           subject: course.subject,
           moodleCourseId: course.moodleCourseId,
+          courseInfoJson: course.courseInfoJson,
           quizCount: course._count.quizzes,
           sessionCount: course._count.studySessions,
           assignments: course.assignments.map((assignment) => ({

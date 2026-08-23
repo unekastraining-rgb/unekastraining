@@ -121,6 +121,16 @@ async function upsertAssignment(
   };
 }
 
+function shouldRefreshInstructor(
+  current: string | null | undefined,
+  next: string | null,
+): boolean {
+  if (!next) return false;
+  if (!current?.trim()) return true;
+  if (/^meet instructor/i.test(current)) return true;
+  return next.length > current.length + 8;
+}
+
 export async function importMoodleCourses(
   userId: string,
   courses: MoodleImportCourse[],
@@ -159,10 +169,12 @@ export async function importMoodleCourses(
         where: { id: course.id },
         data: {
           moodleCourseId: moodleCourse.id,
-          ...(instructor && !course.instructor ? { instructor } : {}),
+          ...(instructor && shouldRefreshInstructor(course.instructor, instructor)
+            ? { instructor }
+            : {}),
         },
       });
-      if (instructor && !course.instructor) {
+      if (instructor && shouldRefreshInstructor(course.instructor, instructor)) {
         course = { ...course, instructor };
       }
     }

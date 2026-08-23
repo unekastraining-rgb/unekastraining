@@ -14,6 +14,7 @@ import {
   fetchMoodlePagesByCourse,
   fetchSyllabusText,
   isMoodleOnboardingCourse,
+  pickPrimarySyllabusSource,
 } from "@/lib/lms/moodle-syllabus";
 
 export async function collectMoodleCoursesForImport(
@@ -52,11 +53,18 @@ export async function collectMoodleCoursesForImport(
     const syllabusSources = discoverSyllabusSources(contents, books, pages);
     let syllabusText = "";
     let syllabusUrl: string | null = null;
+    let syllabusModuleName: string | null = null;
 
-    if (syllabusSources.length > 0) {
-      const primary = syllabusSources[0]!;
+    const primary = pickPrimarySyllabusSource(syllabusSources);
+    if (primary) {
       syllabusUrl = primary.url;
-      syllabusText = await fetchSyllabusText(root, token, primary);
+      syllabusModuleName = primary.name;
+      const primaryModule = contents
+        .flatMap((section) => section.modules ?? [])
+        .find((mod) => mod.id === primary.moduleId);
+      syllabusText = await fetchSyllabusText(root, token, primary, {
+        module: primaryModule,
+      });
     }
 
     payload.push({
@@ -66,7 +74,7 @@ export async function collectMoodleCoursesForImport(
       calendarAssignments,
       syllabusText: syllabusText || null,
       syllabusUrl,
-      syllabusModuleName: syllabusSources[0]?.name ?? null,
+      syllabusModuleName,
     });
   }
 

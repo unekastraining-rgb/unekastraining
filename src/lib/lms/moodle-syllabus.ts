@@ -7,6 +7,9 @@ import type {
 const SYLLABUS_NAME_PATTERN =
   /\b(syllabus|course outline|course information|course info)\b/i;
 
+const INSTRUCTOR_PAGE_PATTERN =
+  /\b(instructor|office hour|about your instructor)\b/i;
+
 export interface MoodleSyllabusSource {
   modtype: string;
   name: string;
@@ -40,7 +43,7 @@ export function discoverSyllabusSources(
       const isBookSyllabus = modtype === "book" && isSyllabusName;
       const isPageSyllabus =
         modtype === "page" &&
-        /\b(syllabus|course outline|instructor|course information)\b/i.test(name);
+        /\b(syllabus|course outline|course information)\b/i.test(name);
       const isResourceSyllabus =
         (modtype === "resource" || modtype === "folder") && isSyllabusName;
 
@@ -69,7 +72,30 @@ export function discoverSyllabusSources(
     }
   }
 
-  return sources;
+  return sortSyllabusSources(sources);
+}
+
+export function rankSyllabusSource(source: MoodleSyllabusSource): number {
+  let score = 0;
+  if (source.modtype === "book") score += 100;
+  if (SYLLABUS_NAME_PATTERN.test(source.name)) score += 80;
+  if (INSTRUCTOR_PAGE_PATTERN.test(source.name)) score -= 60;
+  score += Math.min(source.chapterTitles.length, 20) * 3;
+  score += Math.min(source.fileUrls.length, 30);
+  return score;
+}
+
+export function sortSyllabusSources(
+  sources: MoodleSyllabusSource[],
+): MoodleSyllabusSource[] {
+  return [...sources].sort((a, b) => rankSyllabusSource(b) - rankSyllabusSource(a));
+}
+
+export function pickPrimarySyllabusSource(
+  sources: MoodleSyllabusSource[],
+): MoodleSyllabusSource | null {
+  const sorted = sortSyllabusSources(sources);
+  return sorted[0] ?? null;
 }
 
 function extractBookChapterTitles(mod: MoodleCourseContentModule): string[] {
@@ -127,10 +153,50 @@ async function fetchPluginFileText(
   return text.trim();
 }
 
+export function parseBookChapterFileUrls(mod: MoodleCourseContentModule): Array<{
+  title: string;
+  fileUrl: string | null;
+}> {
+  const structure = mod.contents?.find((item) => item.filename === "structure");
+  const htmlFiles = (mod.contents ?? []).filter(
+    (item) => item.type === "file" && item.filename === "index.html" && item.fileurl,
+  );
+
+  if (!structure?.content) {
+    return htmlFiles.map((file, index) => ({
+      title: `Chapter ${index + 1}`,
+      fileUrl: file.fileurl ?? null,
+    }));
+  }
+
+  try {
+    const nodes = JSON.parse(structure.content) as Array<{
+      title?: string;
+      href?: string;
+    }>;
+
+    return nodes.map((node, index) => {
+      const title = (node.title ?? `Chapter ${index + 1}`).replace(/&amp;/g, "&").trim();
+      const hrefPrefix = node.href?.split("/")[0];
+      const matched =
+        htmlFiles.find((file) => hrefPrefix && file.filepath?.includes(hrefPrefix)) ??
+        htmlFiles[index] ??
+        null;
+      return { title, fileUrl: matched?.fileurl ?? null };
+    });
+  } catch {
+    return htmlFiles.map((file, index) => ({
+      title: `Chapter ${index + 1}`,
+      fileUrl: file.fileurl ?? null,
+    }));
+  }
+}
+
 export async function fetchSyllabusText(
   baseUrl: string,
   token: string,
   source: MoodleSyllabusSource,
+  options?: { module?: MoodleCourseContentModule },
 ): Promise<string> {
   const parts: string[] = [`# ${source.name}`];
 
@@ -138,25 +204,37 @@ export async function fetchSyllabusText(
     parts.push(htmlToPlainText(source.introHtml));
   }
 
-  if (source.chapterTitles.length > 0) {
-    parts.push("\n## Chapters\n" + source.chapterTitles.map((title) => `- ${title}`).join("\n"));
-  }
-
-  const htmlFiles = source.fileUrls.filter((url) => /\.html?(\?|$)/i.test(url));
-  const otherFiles = source.fileUrls.filter((url) => !/\.html?(\?|$)/i.test(url));
-
-  for (const fileUrl of htmlFiles.slice(0, 12)) {
-    const chapterText = await fetchPluginFileText(baseUrl, token, fileUrl);
-    if (chapterText) {
-      parts.push(`\n---\n${chapterText}`);
+  if (source.modtype === "book" && options?.module) {
+    const chapters = parseBookChapterFileUrls(options.module);
+    for (const chapter of chapters) {
+      if (!chapter.fileUrl) continue;
+      const chapterText = await fetchPluginFileText(baseUrl, token, chapter.fileUrl);
+      if (!chapterText) continue;
+      parts.push(`\n## ${chapter.title}\n\n${chapterText}`);
     }
-  }
+  } else {
+    if (source.chapterTitles.length > 0) {
+      parts.push(
+        "\n## Chapters\n" + source.chapterTitles.map((title) => `- ${title}`).join("\n"),
+      );
+    }
 
-  if (parts.length <= 2 && otherFiles.length > 0) {
-    parts.push(
-      "\n## Attachments\n" +
-        otherFiles.map((url) => `- ${url.split("/").pop() ?? url}`).join("\n"),
-    );
+    const htmlFiles = source.fileUrls.filter((url) => /\.html?(\?|$)/i.test(url));
+    const otherFiles = source.fileUrls.filter((url) => !/\.html?(\?|$)/i.test(url));
+
+    for (const fileUrl of htmlFiles.slice(0, 24)) {
+      const chapterText = await fetchPluginFileText(baseUrl, token, fileUrl);
+      if (chapterText) {
+        parts.push(`\n---\n${chapterText}`);
+      }
+    }
+
+    if (parts.length <= 2 && otherFiles.length > 0) {
+      parts.push(
+        "\n## Attachments\n" +
+          otherFiles.map((url) => `- ${url.split("/").pop() ?? url}`).join("\n"),
+      );
+    }
   }
 
   return parts.join("\n\n").trim();
@@ -198,6 +276,8 @@ export async function fetchMoodlePagesByCourse(
 
 export function extractInstructorFromText(text: string): string | null {
   const patterns = [
+    /meet\s+instructor\s*[-–:]\s*(.+)/i,
+    /(?:instructor|professor)\s*[-–:]\s*((?:Mr\.|Mrs\.|Ms\.|Dr\.|Prof\.)?\s*[A-Za-z][A-Za-z .'-]{2,60})/i,
     /instructor[:\s]+([A-Za-z][A-Za-z .'-]{2,60})/i,
     /professor[:\s]+([A-Za-z][A-Za-z .'-]{2,60})/i,
     /taught by[:\s]+([A-Za-z][A-Za-z .'-]{2,60})/i,
@@ -205,8 +285,9 @@ export function extractInstructorFromText(text: string): string | null {
 
   for (const pattern of patterns) {
     const match = text.match(pattern);
-    if (match?.[1]) {
-      return match[1].replace(/\s+/g, " ").trim();
+    const value = match?.[1] ?? match?.[2];
+    if (value) {
+      return value.replace(/\s+/g, " ").trim();
     }
   }
 
