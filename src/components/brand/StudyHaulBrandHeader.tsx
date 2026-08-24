@@ -163,7 +163,7 @@ export function StudyHaulBrandHeader({
             isCompact ? "" : "pl-[0.08em]"
           }`}
         >
-          (Yesenia&apos;s Nerd)
+          (Nadia&apos;s Nerd)
         </p>
       ) : null}
     </div>

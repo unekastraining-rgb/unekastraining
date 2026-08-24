@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Loader2,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   Save,
   Trash2,
@@ -44,6 +46,11 @@ import {
 import { confirmDelete } from "@/lib/confirm-delete";
 import type { CoreStudioType } from "@/lib/core/studio-types";
 import type { InkTool, ShapeKind } from "@/lib/core/ink-engine";
+import {
+  elementIntersectsLasso,
+  selectStrokesInLasso,
+} from "@/lib/core/ink-engine";
+import type { SketchPoint } from "@/lib/core/note-types";
 import { PAGE_TEMPLATES, PEN_PRESETS, type PageTemplateId } from "@/lib/core/page-templates";
 import { buildWhiteboardStarter, canvasToDecorations, mergeCanvasData, mergeWhiteboardStarters } from "@/lib/core/whiteboard-starters";
 import { formatIdsFromStarters, layoutIdsFromStarters } from "@/lib/core/canvas-starters";
@@ -62,6 +69,7 @@ import { PageFormatBlocksLayer } from "@/components/core/PageFormatBlocksLayer";
 import { pageCanvasMinHeight } from "@/lib/core/block-layout";
 import { NotebookPageRail } from "@/components/core/NotebookPageRail";
 import { InteractiveCanvasElements } from "@/components/core/canvas/InteractiveCanvasElements";
+import { LaserPointerOverlay } from "@/components/core/canvas/LaserPointerOverlay";
 import { CanvasElementInspector } from "@/components/core/canvas/CanvasElementInspector";
 import { ShapeDrawOverlay } from "@/components/core/canvas/ShapeDrawOverlay";
 import { insertElementDefinition } from "@/lib/core/elements/insert";
@@ -163,6 +171,26 @@ export function CoreNotesWorkspace({
   const [setupOpen, setSetupOpen] = useState(false);
   const [sidePanel, setSidePanel] = useState<CorePanelTab | null>(null);
   const [mobileNotesOpen, setMobileNotesOpen] = useState(false);
+  const [notesRailOpen, setNotesRailOpen] = useState(true);
+  const [laserActive, setLaserActive] = useState(false);
+  const [selectedStrokeIds, setSelectedStrokeIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("core-notes-rail-open");
+      if (stored === "false") setNotesRailOpen(false);
+    } catch {
+      // ignore storage errors
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("core-notes-rail-open", String(notesRailOpen));
+    } catch {
+      // ignore storage errors
+    }
+  }, [notesRailOpen]);
 
   useEffect(() => {
     if (!sidePanel && !mobileNotesOpen) return;
@@ -172,6 +200,8 @@ export function CoreNotesWorkspace({
       if (target.closest("[data-core-side-panel]")) return;
       if (target.closest("[data-core-notes-drawer]")) return;
       if (target.closest("[data-core-header]")) return;
+      if (target.closest("[data-core-toolbar]")) return;
+      if (target.closest("[data-core-toolbar-dock]")) return;
       setSidePanel(null);
       setMobileNotesOpen(false);
     }
@@ -348,6 +378,7 @@ export function CoreNotesWorkspace({
   }
 
   function activateSketchTool(ink: InkTool = toolbarState.inkTool) {
+    setLaserActive(false);
     setTool("sketch");
     setInkTool(ink);
     patchToolbar({ inkTool: ink });
@@ -978,11 +1009,70 @@ export function CoreNotesWorkspace({
 
   const sketchDrawingActive =
     !toolbarState.readOnly &&
+    !laserActive &&
     (tool === "sketch" || tool === "annotate") &&
-    (inkTool === "pen" || inkTool === "highlighter" || inkTool === "eraser");
+    (inkTool === "pen" ||
+      inkTool === "highlighter" ||
+      inkTool === "eraser" ||
+      inkTool === "lasso");
 
   const shapeDrawActive =
     !toolbarState.readOnly && tool === "sketch" && inkTool === "shape";
+
+  function handleLassoComplete(lasso: SketchPoint[]) {
+    const settings = toolbarState.lasso;
+    const pageStrokes = tool === "annotate" ? doc.annotations ?? [] : doc.strokes ?? [];
+    const strokeIds = settings.selectHandwriting
+      ? selectStrokesInLasso(pageStrokes, lasso).map(
+          (stroke, index) => stroke.id ?? `s${pageStrokes.indexOf(stroke) ?? index}`,
+        )
+      : [];
+    const elementIds: string[] = [];
+
+    if (settings.selectImages) {
+      for (const image of doc.pageImages ?? []) {
+        if (
+          elementIntersectsLasso(
+            { x: image.x, y: image.y, w: image.width, h: image.height ?? image.width },
+            lasso,
+          )
+        ) {
+          elementIds.push(image.id);
+        }
+      }
+    }
+
+    if (settings.selectStickyNotes || settings.selectShapes) {
+      for (const decoration of doc.decorations ?? []) {
+        const isSticky = decoration.kind === "sticky";
+        const isShape = !isSticky;
+        if ((isSticky && settings.selectStickyNotes) || (isShape && settings.selectShapes)) {
+          if (elementIntersectsLasso({ x: decoration.x, y: decoration.y, w: decoration.w, h: decoration.h }, lasso)) {
+            elementIds.push(decoration.id);
+          }
+        }
+      }
+    }
+
+    if (settings.selectTextBoxes) {
+      for (const box of doc.pageTextBoxes ?? []) {
+        if (
+          elementIntersectsLasso(
+            { x: box.x, y: box.y, w: box.width, h: box.height },
+            lasso,
+          )
+        ) {
+          elementIds.push(box.id);
+        }
+      }
+    }
+
+    setSelectedStrokeIds(strokeIds);
+    setSelectedCanvasElementIds(elementIds);
+    setTool("type");
+    setInkTool("pen");
+    patchToolbar({ inkTool: "pen" });
+  }
 
   function shouldRenderSketchLayer() {
     if (!shouldShowSketchOverlay()) return false;
@@ -1315,6 +1405,15 @@ export function CoreNotesWorkspace({
           </div>
           <button
             type="button"
+            onClick={() => setNotesRailOpen((open) => !open)}
+            className="inline-flex shrink-0 rounded-xl border border-brand p-2 text-stone-600 hover:bg-brand-soft/40"
+            aria-label={notesRailOpen ? "Hide notebooks sidebar" : "Show notebooks sidebar"}
+            title={notesRailOpen ? "Hide notebooks" : "Show notebooks"}
+          >
+            {notesRailOpen ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
+          </button>
+          <button
+            type="button"
             onClick={() => setMobileNotesOpen((open) => !open)}
             className="shrink-0 rounded-xl border border-brand px-2.5 py-2 text-xs font-semibold text-stone-700 md:hidden"
           >
@@ -1447,17 +1546,43 @@ export function CoreNotesWorkspace({
       ) : null}
 
       <div className="flex min-h-0 flex-1">
-        <aside className="hidden w-56 shrink-0 flex-col border-r border-brand bg-white/90 md:flex">
+        {!notesRailOpen ? (
+          <button
+            type="button"
+            onClick={() => setNotesRailOpen(true)}
+            className="hidden w-9 shrink-0 flex-col items-center justify-center border-r border-brand bg-white/90 text-stone-500 hover:bg-brand-soft/30 md:flex"
+            aria-label="Show notebooks sidebar"
+            title="Show notebooks"
+          >
+            <PanelLeftOpen className="h-4 w-4" />
+          </button>
+        ) : null}
+        {notesRailOpen ? (
+        <aside
+          data-core-notes-rail
+          className="hidden w-56 shrink-0 flex-col border-r border-brand bg-white/90 md:flex"
+        >
           <div className="flex items-center justify-between border-b border-brand/30 px-3 py-3">
-            <p className="text-sm font-bold text-stone-800">Pages</p>
-            <button
-              type="button"
-              onClick={() => setSetupOpen(true)}
-              className="rounded-lg bg-brand-soft p-1.5 text-brand hover:brightness-95"
-              aria-label="New notebook"
-            >
-              <Plus className="h-4 w-4" />
-            </button>
+            <p className="text-sm font-bold text-stone-800">Notebooks</p>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setSetupOpen(true)}
+                className="rounded-lg bg-brand-soft p-1.5 text-brand hover:brightness-95"
+                aria-label="New notebook"
+              >
+                <Plus className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setNotesRailOpen(false)}
+                className="rounded-lg p-1.5 text-stone-500 hover:bg-stone-100"
+                aria-label="Hide notebooks sidebar"
+                title="Hide notebooks"
+              >
+                <PanelLeftClose className="h-4 w-4" />
+              </button>
+            </div>
           </div>
           <div className="flex-1 overflow-y-auto p-2">
             {loading ? (
@@ -1497,76 +1622,88 @@ export function CoreNotesWorkspace({
             )}
           </div>
         </aside>
+        ) : null}
 
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <div className="relative z-20 shrink-0">
-          <CoreToolbar
-            state={toolbarState}
-            onChange={patchToolbar}
-            inkColor={inkColor}
-            onInkColorChange={setInkColor}
-            courseId={courseId}
-            materialId={selectedMaterialId}
-            onInsertPageAsset={insertPageImage}
-            onInsertElement={insertElement}
-            listening={listening}
-            selectActive={tool === "type"}
-            pageTemplateId={doc.notebook?.pageTemplateId}
-            customBackgroundAssetId={doc.notebook?.customBackgroundAssetId}
-            onSelectBuiltinTemplate={applyBuiltinTemplate}
-            onSelectImportedTemplate={applyImportedTemplate}
-            actions={{
-              onOpenChat: () => setSidePanel("assist"),
-              onOpenAssist: () => {
-                setSidePanel("assist");
-              },
-              onToggleReadOnly: () => {
-                patchToolbar({ readOnly: !toolbarState.readOnly });
-              },
-              onSelectPenMode: (mode) => {
-                activateSketchTool(penModeToInkTool(mode));
-                const size = penModeToInkSize(mode, { ...toolbarState, activePenMode: mode });
-                setInkSize(size);
-                if (mode === "highlighter") setInkTool("highlighter");
-                if (mode === "shape") setInkTool("shape");
-              },
-              onSetInkTool: (ink) => {
-                activateSketchTool(ink);
-              },
-              onSetShapeKind: setShapeKind,
-              onAddTextBox: () => {
-                if (!toolbarState.readOnly) addTextBox();
-              },
-              onAddSticky: () => {
-                if (!toolbarState.readOnly) addDecoration("sticky");
-              },
-              onSelectTool: () => {
-                setTool("type");
-              },
-              onGroup: handleCanvasGroup,
-              onUngroup: handleCanvasUngroup,
-              onCopy: handleCanvasCopy,
-              onPaste: handleCanvasPaste,
-              onInsertImage: () => {},
-              onInsertElements: () => {},
-              onStartRecord: () => {
-                setSidePanel("tools");
-                startDictation();
-              },
-              onShowRecordings: () => {
-                setSidePanel("tools");
-              },
-              onClearPage: clearCurrentPage,
-              onUndo: sketchInk.undo,
-              onRedo: sketchInk.redo,
-              canUndo: sketchInk.canUndo,
-              canRedo: sketchInk.canRedo,
-            }}
-          />
-          </div>
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+          <LaserPointerOverlay active={laserActive} color="#ef4444" />
 
-          <div className="relative z-0 flex min-h-0 flex-1 flex-col overflow-hidden md:flex-row">
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col p-2 sm:p-3">
+          <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+            <CoreToolbar
+              state={toolbarState}
+              onChange={patchToolbar}
+              inkColor={inkColor}
+              onInkColorChange={setInkColor}
+              courseId={courseId}
+              materialId={selectedMaterialId}
+              onInsertPageAsset={insertPageImage}
+              onInsertElement={insertElement}
+              listening={listening}
+              selectActive={tool === "type"}
+              laserActive={laserActive}
+              pageTemplateId={doc.notebook?.pageTemplateId}
+              customBackgroundAssetId={doc.notebook?.customBackgroundAssetId}
+              onSelectBuiltinTemplate={applyBuiltinTemplate}
+              onSelectImportedTemplate={applyImportedTemplate}
+              actions={{
+                onOpenChat: () => setSidePanel("assist"),
+                onOpenAssist: () => {
+                  setSidePanel("assist");
+                },
+                onToggleReadOnly: () => {
+                  patchToolbar({ readOnly: !toolbarState.readOnly });
+                },
+                onSelectPenMode: (mode) => {
+                  activateSketchTool(penModeToInkTool(mode));
+                  const size = penModeToInkSize(mode, { ...toolbarState, activePenMode: mode });
+                  setInkSize(size);
+                  if (mode === "highlighter") setInkTool("highlighter");
+                  if (mode === "shape") setInkTool("shape");
+                },
+                onSetInkTool: (ink) => {
+                  activateSketchTool(ink);
+                },
+                onSetShapeKind: setShapeKind,
+                onAddTextBox: () => {
+                  if (!toolbarState.readOnly) addTextBox();
+                },
+                onAddSticky: () => {
+                  if (!toolbarState.readOnly) addDecoration("sticky");
+                },
+                onSelectTool: () => {
+                  setLaserActive(false);
+                  setTool("type");
+                  setInkTool("pen");
+                  patchToolbar({ inkTool: "pen" });
+                },
+                onToggleLaser: () => {
+                  setLaserActive((active) => !active);
+                  setTool("type");
+                  setInkTool("pen");
+                  patchToolbar({ inkTool: "pen" });
+                },
+                onGroup: handleCanvasGroup,
+                onUngroup: handleCanvasUngroup,
+                onCopy: handleCanvasCopy,
+                onPaste: handleCanvasPaste,
+                onInsertImage: () => {},
+                onInsertElements: () => {},
+                onStartRecord: () => {
+                  setSidePanel("tools");
+                  startDictation();
+                },
+                onShowRecordings: () => {
+                  setSidePanel("tools");
+                },
+                onClearPage: clearCurrentPage,
+                onUndo: sketchInk.undo,
+                onRedo: sketchInk.redo,
+                canUndo: sketchInk.canUndo,
+                canRedo: sketchInk.canRedo,
+              }}
+            />
+
+            <div className="relative flex min-h-0 flex-1 overflow-hidden">
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col p-1 sm:p-2">
               {!activeId ? (
                 <div className="flex flex-1 flex-col items-center justify-center rounded-2xl border border-dashed border-orange-200 bg-white p-8 text-center">
                   <p className="text-lg font-bold text-stone-900">Start a notebook</p>
@@ -1605,6 +1742,7 @@ export function CoreNotesWorkspace({
                       const target = event.target as HTMLElement;
                       if (target.closest("[data-format-block], [data-canvas-element], [data-canvas-inspector]")) return;
                       setSelectedCanvasElementIds([]);
+                      setSelectedStrokeIds([]);
                     }}
                   >
                     {renderFormatCanvas()}
@@ -1626,6 +1764,9 @@ export function CoreNotesWorkspace({
                         lineWidth={inkSize}
                         inkTool={inkTool}
                         pencilOnly={pencilOnly}
+                        lassoMode={toolbarState.lasso.mode}
+                        highlightedStrokeIds={new Set(selectedStrokeIds)}
+                        onLassoComplete={handleLassoComplete}
                         className={`absolute inset-0 ${sketchDrawingActive ? "z-[30]" : "z-[6]"}`}
                       />
                     ) : null}
@@ -1696,11 +1837,11 @@ export function CoreNotesWorkspace({
             </div>
 
             {sidePanel ? (
-                <aside
+                <div
                   data-core-side-panel
-                  className="fixed inset-y-0 right-0 z-[70] flex w-[min(100vw,20rem)] shrink-0 flex-col border-l border-brand bg-white/95 shadow-xl md:static md:z-auto md:w-80 md:shadow-none"
+                  className="absolute right-2 top-2 z-40 flex max-h-[min(75vh,36rem)] w-[min(22rem,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-2xl border border-brand bg-white shadow-2xl"
                 >
-                <div className="flex border-b border-brand/30">
+                <div className="flex shrink-0 border-b border-brand/30">
                   {(
                     [
                       { id: "tools", label: "Tools" },
@@ -1721,6 +1862,14 @@ export function CoreNotesWorkspace({
                       {item.label}
                     </button>
                   ))}
+                  <button
+                    type="button"
+                    onClick={() => setSidePanel(null)}
+                    className="px-3 py-2 text-xs font-bold text-stone-400 hover:text-stone-700"
+                    aria-label="Close panel"
+                  >
+                    ✕
+                  </button>
                 </div>
                 <div className="min-h-0 flex-1 overflow-y-auto">
                   <CoreSidePanel
@@ -1867,8 +2016,9 @@ export function CoreNotesWorkspace({
                     </div>
                   ) : null}
                 </div>
-              </aside>
+              </div>
             ) : null}
+            </div>
           </div>
 
           {activeId ? (

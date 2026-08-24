@@ -26,6 +26,7 @@ export function TransformableElement({
   rect,
   selected,
   editable = true,
+  dragFromHandleOnly = false,
   zIndex = CANVAS_ELEMENT_BASE_Z,
   onChange,
   onSelect,
@@ -39,6 +40,7 @@ export function TransformableElement({
   rect: TransformableRect;
   selected?: boolean;
   editable?: boolean;
+  dragFromHandleOnly?: boolean;
   zIndex?: number;
   onChange: (patch: Partial<TransformableRect>) => void;
   onSelect?: (options?: { shiftKey?: boolean }) => void;
@@ -197,8 +199,8 @@ export function TransformableElement({
       }}
     >
       <div
-        className={`relative h-full w-full ${editable && !rect.locked ? "cursor-move" : ""}`}
-        onPointerDown={startDrag}
+        className={`relative h-full w-full ${editable && !rect.locked && !dragFromHandleOnly ? "cursor-move" : ""}`}
+        onPointerDown={dragFromHandleOnly ? undefined : startDrag}
       >
         {children}
       </div>

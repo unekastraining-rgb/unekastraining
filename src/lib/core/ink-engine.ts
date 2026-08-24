@@ -155,6 +155,37 @@ export function selectStrokesInLasso(
   );
 }
 
+export function lassoPolygonFromRect(
+  start: SketchPoint,
+  end: SketchPoint,
+): SketchPoint[] {
+  const x1 = Math.min(start.x, end.x);
+  const y1 = Math.min(start.y, end.y);
+  const x2 = Math.max(start.x, end.x);
+  const y2 = Math.max(start.y, end.y);
+  return [
+    { x: x1, y: y1 },
+    { x: x2, y: y1 },
+    { x: x2, y: y2 },
+    { x: x1, y: y2 },
+  ];
+}
+
+export function elementIntersectsLasso(
+  rect: { x: number; y: number; w: number; h: number },
+  lasso: SketchPoint[],
+): boolean {
+  if (lasso.length < 3) return false;
+  const probes = [
+    { x: rect.x, y: rect.y },
+    { x: rect.x + rect.w, y: rect.y },
+    { x: rect.x + rect.w, y: rect.y + rect.h },
+    { x: rect.x, y: rect.y + rect.h },
+    { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 },
+  ];
+  return probes.some((point) => pointInPolygon(point, lasso));
+}
+
 export function translateStrokes(
   strokes: SketchStroke[],
   selectedIds: Set<string>,

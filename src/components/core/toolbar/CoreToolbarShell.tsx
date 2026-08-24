@@ -1,6 +1,23 @@
 "use client";
 
 import { ChevronLeft, X } from "lucide-react";
+import { createContext, useContext } from "react";
+
+const CoreToolbarEmbedContext = createContext(false);
+
+export function CoreToolbarEmbedProvider({
+  embedded,
+  children,
+}: {
+  embedded: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <CoreToolbarEmbedContext.Provider value={embedded}>
+      {children}
+    </CoreToolbarEmbedContext.Provider>
+  );
+}
 
 export function CoreToolbarShell({
   title,
@@ -9,6 +26,7 @@ export function CoreToolbarShell({
   children,
   className = "",
   align = "left",
+  embedded,
 }: {
   title: string;
   onBack?: () => void;
@@ -16,14 +34,21 @@ export function CoreToolbarShell({
   children: React.ReactNode;
   className?: string;
   align?: "left" | "right";
+  embedded?: boolean;
 }) {
+  const embeddedFromContext = useContext(CoreToolbarEmbedContext);
+  const isEmbedded = embedded ?? embeddedFromContext;
   const alignClass = align === "right" ? "md:right-0 md:left-auto" : "md:left-0";
   return (
     <div
       data-core-toolbar-panel
-      className={`fixed inset-x-0 bottom-0 z-[90] max-h-[min(85dvh,32rem)] w-full rounded-t-2xl border border-stone-200 bg-white shadow-2xl md:absolute md:inset-x-auto md:bottom-auto ${alignClass} md:top-full md:mt-2 md:max-h-none md:w-[min(22rem,calc(100vw-2rem))] md:rounded-2xl ${className}`}
+      className={
+        isEmbedded
+          ? `flex h-full min-h-0 w-full flex-col bg-white ${className}`
+          : `fixed inset-x-0 bottom-0 z-[90] max-h-[min(85dvh,32rem)] w-full rounded-t-2xl border border-stone-200 bg-white shadow-2xl md:absolute md:inset-x-auto md:bottom-auto ${alignClass} md:top-full md:mt-2 md:max-h-none md:w-[min(22rem,calc(100vw-2rem))] md:rounded-2xl ${className}`
+      }
     >
-      <header className="flex items-center gap-2 border-b border-stone-100 px-3 py-2.5">
+      <header className="flex shrink-0 items-center gap-2 border-b border-stone-100 px-3 py-2.5">
         {onBack ? (
           <button
             type="button"
@@ -44,7 +69,15 @@ export function CoreToolbarShell({
           <X className="h-4 w-4" />
         </button>
       </header>
-      <div className="max-h-[min(28rem,70vh)] overflow-y-auto p-3">{children}</div>
+      <div
+        className={
+          isEmbedded
+            ? "min-h-0 flex-1 overflow-y-auto p-3"
+            : "max-h-[min(28rem,70vh)] overflow-y-auto p-3"
+        }
+      >
+        {children}
+      </div>
     </div>
   );
 }

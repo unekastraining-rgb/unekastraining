@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useRef } from "react";
 
-import type { SketchStroke } from "@/lib/core/note-types";
+import type { SketchPoint, SketchStroke } from "@/lib/core/note-types";
 import {
   drawStroke,
   drawStrokes,
   eraseAtPoint,
+  lassoPolygonFromRect,
   pointerFromEvent,
   shouldRejectPointer,
   strokeColor,
@@ -14,6 +15,7 @@ import {
   strokeWidth,
   type InkTool,
 } from "@/lib/core/ink-engine";
+import type { LassoMode } from "@/lib/core/core-toolbar-types";
 
 export function SketchLayer({
   strokes,
@@ -23,6 +25,9 @@ export function SketchLayer({
   lineWidth = 4,
   inkTool = "pen",
   pencilOnly = true,
+  lassoMode = "freehand",
+  highlightedStrokeIds,
+  onLassoComplete,
   className = "",
 }: {
   strokes: SketchStroke[];
@@ -32,11 +37,16 @@ export function SketchLayer({
   lineWidth?: number;
   inkTool?: InkTool;
   pencilOnly?: boolean;
+  lassoMode?: LassoMode;
+  highlightedStrokeIds?: Set<string>;
+  onLassoComplete?: (lasso: SketchPoint[]) => void;
   className?: string;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawing = useRef(false);
   const currentStroke = useRef<SketchStroke | null>(null);
+  const lassoPoints = useRef<SketchPoint[]>([]);
+  const lassoStart = useRef<SketchPoint | null>(null);
   const liveStrokes = useRef(strokes);
 
   useEffect(() => {
@@ -54,12 +64,42 @@ export function SketchLayer({
     canvas.width = rect.width * ratio;
     canvas.height = rect.height * ratio;
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-    drawStrokes(ctx, liveStrokes.current, rect.width, rect.height);
+    ctx.clearRect(0, 0, rect.width, rect.height);
+
+    const rendered = liveStrokes.current.map((stroke, index) => {
+      const id = stroke.id ?? `s${index}`;
+      if (!highlightedStrokeIds?.has(id)) return stroke;
+      return {
+        ...stroke,
+        color: "#0d9488",
+        width: stroke.width + 1,
+      };
+    });
+    drawStrokes(ctx, rendered, rect.width, rect.height);
 
     if (currentStroke.current) {
       drawStroke(ctx, currentStroke.current);
     }
-  }, []);
+
+    if (lassoPoints.current.length > 1) {
+      ctx.save();
+      ctx.strokeStyle = "#0d9488";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      lassoPoints.current.forEach((point, index) => {
+        if (index === 0) ctx.moveTo(point.x, point.y);
+        else ctx.lineTo(point.x, point.y);
+      });
+      if (lassoMode === "freehand" && lassoPoints.current.length > 2) {
+        const first = lassoPoints.current[0];
+        ctx.lineTo(first.x, first.y);
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+  }, [highlightedStrokeIds, lassoMode]);
 
   useEffect(() => {
     redraw();
@@ -70,6 +110,14 @@ export function SketchLayer({
   function finishStroke() {
     if (!drawing.current) return;
     drawing.current = false;
+
+    if (inkTool === "lasso" && lassoPoints.current.length > 2) {
+      onLassoComplete?.(lassoPoints.current);
+      lassoPoints.current = [];
+      lassoStart.current = null;
+      redraw();
+      return;
+    }
 
     if (inkTool === "eraser" && currentStroke.current) {
       const last = currentStroke.current.points.at(-1);
@@ -87,18 +135,38 @@ export function SketchLayer({
     currentStroke.current = null;
   }
 
+  const inkActive =
+    active &&
+    (inkTool === "pen" ||
+      inkTool === "highlighter" ||
+      inkTool === "eraser" ||
+      inkTool === "lasso");
+
   return (
     <canvas
       ref={canvasRef}
-      className={`absolute inset-0 h-full w-full ${active ? "cursor-crosshair touch-none" : "pointer-events-none"} ${className}`}
-      style={active ? { touchAction: "none" } : undefined}
+      className={`absolute inset-0 h-full w-full ${
+        inkActive ? "cursor-crosshair touch-none" : "pointer-events-none"
+      } ${className}`}
+      style={inkActive ? { touchAction: "none" } : undefined}
       onPointerDown={(event) => {
-        if (!active) return;
-        if (inkTool !== "pen" && inkTool !== "highlighter" && inkTool !== "eraser") return;
+        if (!inkActive) return;
         if (shouldRejectPointer(event, pencilOnly)) return;
 
         const rect = canvasRef.current!.getBoundingClientRect();
         const point = pointerFromEvent(event, rect);
+
+        if (inkTool === "lasso") {
+          drawing.current = true;
+          lassoStart.current = point;
+          lassoPoints.current =
+            lassoMode === "rect" ? lassoPolygonFromRect(point, point) : [point];
+          canvasRef.current?.setPointerCapture(event.pointerId);
+          event.preventDefault();
+          return;
+        }
+
+        if (inkTool !== "pen" && inkTool !== "highlighter" && inkTool !== "eraser") return;
 
         if (inkTool === "eraser") {
           drawing.current = true;
@@ -125,11 +193,22 @@ export function SketchLayer({
         event.preventDefault();
       }}
       onPointerMove={(event) => {
-        if (!active || !drawing.current) return;
+        if (!inkActive || !drawing.current) return;
         if (shouldRejectPointer(event, pencilOnly)) return;
 
         const rect = canvasRef.current!.getBoundingClientRect();
         const point = pointerFromEvent(event, rect);
+
+        if (inkTool === "lasso") {
+          if (lassoMode === "rect" && lassoStart.current) {
+            lassoPoints.current = lassoPolygonFromRect(lassoStart.current, point);
+          } else {
+            lassoPoints.current.push(point);
+          }
+          redraw();
+          event.preventDefault();
+          return;
+        }
 
         if (inkTool === "eraser") {
           const radius = strokeWidth(lineWidth, point.pressure ?? 0.5, "eraser");

@@ -136,7 +136,7 @@ export function LoginPageClient({
                   name="name"
                   type="text"
                   autoComplete="name"
-                  placeholder="Yesenia"
+                  placeholder="Nadia"
                   className="mt-1 w-full rounded-xl border border-orange-200 px-4 py-3.5 text-base outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-100"
                 />
               </div>

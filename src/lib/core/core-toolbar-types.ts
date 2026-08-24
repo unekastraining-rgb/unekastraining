@@ -127,6 +127,7 @@ export interface CoreToolbarActions {
   onStartRecord: () => void;
   onShowRecordings: () => void;
   onClearPage: () => void;
+  onToggleLaser: () => void;
   onUndo: () => void;
   onRedo: () => void;
   canUndo: boolean;

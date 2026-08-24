@@ -441,6 +441,7 @@ export function InteractiveCanvasElements({
           }}
           selected={selectedSet.has(item.id)}
           editable={editable}
+          dragFromHandleOnly={item.kind === "sticky"}
           zIndex={item.zIndex ?? CANVAS_ELEMENT_BASE_Z}
           onSelect={(options) => handleSelect(item.id, options)}
           onChange={(patch) => {
@@ -481,16 +482,58 @@ export function InteractiveCanvasElements({
             <div
               className="relative h-full w-full rounded-xl border border-yellow-200/80 shadow-md"
               style={{ backgroundColor: item.color, opacity: item.opacity ?? 1 }}
+              onPointerDown={(event) => {
+                if (!editable || item.locked) return;
+                if (!selectedSet.has(item.id)) {
+                  event.stopPropagation();
+                  handleSelect(item.id, { shiftKey: event.shiftKey });
+                }
+              }}
             >
               <div
                 className="absolute inset-x-0 top-0 z-10 flex h-6 cursor-move items-center justify-center rounded-t-xl"
                 aria-hidden
+                onPointerDown={(event) => {
+                  if (!editable || item.locked) return;
+                  event.stopPropagation();
+                  handleSelect(item.id, { shiftKey: event.shiftKey });
+                  const startX = item.x;
+                  const startY = item.y;
+                  const pointerStartX = event.clientX;
+                  const pointerStartY = event.clientY;
+                  const target = event.currentTarget.closest("[data-canvas-element]") as HTMLElement | null;
+
+                  function onMove(moveEvent: PointerEvent) {
+                    const x = Math.max(0, startX + (moveEvent.clientX - pointerStartX));
+                    const y = Math.max(0, startY + (moveEvent.clientY - pointerStartY));
+                    if (target) {
+                      target.style.left = `${x}px`;
+                      target.style.top = `${y}px`;
+                    }
+                  }
+
+                  function onUp(moveEvent: PointerEvent) {
+                    window.removeEventListener("pointermove", onMove);
+                    window.removeEventListener("pointerup", onUp);
+                    const x = Math.max(0, startX + (moveEvent.clientX - pointerStartX));
+                    const y = Math.max(0, startY + (moveEvent.clientY - pointerStartY));
+                    commitMove(item.id, x, y, "decoration");
+                  }
+
+                  window.addEventListener("pointermove", onMove);
+                  window.addEventListener("pointerup", onUp);
+                }}
               >
                 <div className="h-1 w-8 rounded-full bg-black/15" />
               </div>
               <textarea
                 value={item.text ?? ""}
-                onPointerDown={(e) => e.stopPropagation()}
+                onPointerDown={(event) => {
+                  event.stopPropagation();
+                  if (!selectedSet.has(item.id)) {
+                    handleSelect(item.id);
+                  }
+                }}
                 onChange={(e) => onDecorationTextChange?.(item.id, e.target.value)}
                 className="h-full w-full resize-none bg-transparent px-3 pb-3 pt-7 text-sm outline-none"
                 style={{ color: item.textColor ?? "#44403c" }}

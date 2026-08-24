@@ -91,6 +91,7 @@ export function CoreToolbar({
   onInsertElement,
   listening,
   selectActive = false,
+  laserActive = false,
   pageTemplateId,
   customBackgroundAssetId,
   onSelectBuiltinTemplate,
@@ -107,6 +108,7 @@ export function CoreToolbar({
   onInsertElement: (element: ElementDefinition) => void;
   listening?: boolean;
   selectActive?: boolean;
+  laserActive?: boolean;
   pageTemplateId?: PageTemplateId;
   customBackgroundAssetId?: string | null;
   onSelectBuiltinTemplate?: (templateId: PageTemplateId) => void;
@@ -192,6 +194,7 @@ export function CoreToolbar({
         setOpenPanel(null);
         break;
       case "laser":
+        actions.onToggleLaser();
         setOpenPanel(null);
         break;
       case "record":
@@ -223,7 +226,11 @@ export function CoreToolbar({
   const showCustomize = state.visibleItems.includes("customize");
 
   return (
-    <div ref={toolbarRef} className="relative touch-manipulation border-b border-orange-100 bg-white">
+    <div
+      ref={toolbarRef}
+      data-core-toolbar
+      className="relative z-20 shrink-0 touch-manipulation border-b border-orange-100 bg-white"
+    >
       <div className="flex items-center gap-1 overflow-x-auto px-2 py-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {visible.map((id) => {
           const meta = ITEM_META[id];
@@ -236,15 +243,16 @@ export function CoreToolbar({
             : meta.label;
           const active =
             (id === "select" && selectActive) ||
-            (id === "lasso" && openPanel === "lasso") ||
-            (id === "pen" && openPanel === "pen") ||
+            (id === "lasso" && (openPanel === "lasso" || state.inkTool === "lasso")) ||
+            (id === "pen" && (openPanel === "pen" || ["pen", "highlighter", "shape"].includes(state.inkTool))) ||
             (id === "chat" && openPanel === "chat") ||
             (id === "elements" && openPanel === "elements") ||
             (id === "stickers" && openPanel === "stickers") ||
             (id === "images" && openPanel === "images") ||
             (id === "templates" && openPanel === "templates") ||
             (id === "readWrite" && !state.readOnly) ||
-            (id === "eraser" && state.inkTool === "eraser");
+            (id === "eraser" && state.inkTool === "eraser") ||
+            (id === "laser" && laserActive);
 
           return (
             <div key={id} className="relative">
