@@ -1,5 +1,7 @@
 import type { CourseInfoPortal } from "./types";
 import { parseCourseInfoPortal } from "./types";
+import { extractSyllabusDateItemsFromText, isImportantSyllabusEvent } from "./syllabus-dates";
+import { buildWeeklyHaulFromPortal, type WeeklyHaulBlock } from "./weekly-schedule";
 
 export interface CourseHighlightDate {
   id: string;
@@ -18,6 +20,8 @@ export interface CourseHighlights {
   termEnd?: string;
   instructor?: string;
   importantAssessments: CourseHighlightDate[];
+  importantEvents: CourseHighlightDate[];
+  thisWeeksHaul: WeeklyHaulBlock | null;
   whatYouNeed: WhatYouNeedGroup[];
   gradingSnapshot?: string;
   hasPortal: boolean;
@@ -26,7 +30,13 @@ export interface CourseHighlights {
 const ASSESSMENT_PATTERN =
   /\b(quiz|assessment|exam|midterm|mid-term|final|pre-course|post-course)\b/i;
 const ROUTINE_WORK_PATTERN =
-  /\b(podcast|business plan|presentation|portfolio)\b/i;
+  /\b(podcast|business plan|presentation|portfolio|summary)\b/i;
+const TRUE_IMPORTANT_DATE_PATTERN =
+  /\b(zoom|live\s+session|virtual|webinar|withdraw|drop|last day|holiday|break|no\s+class|aea|proctored|office\s+hours|academic calendar)\b/i;
+const PROSE_PATTERN =
+  /\b(subchapter|following|you will find|details about|once leads|long-term success|grade breakdown)\b/i;
+const GENERIC_DATE_SECTION_TITLE =
+  /^(important dates?|course schedule|academic calendar|weekly schedule)$/i;
 
 interface AssignmentLike {
   id: string;
@@ -48,6 +58,8 @@ function normalizeTitle(title: string): string {
   return title
     .replace(/\bopens?\b/gi, "")
     .replace(/\bis due\b/gi, "")
+    .replace(/\)\s+is$/i, ")")
+    .replace(/\bis$/i, "")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -56,8 +68,25 @@ function titleKey(title: string): string {
   return normalizeTitle(title).toLowerCase();
 }
 
+function isRoutineWork(title: string): boolean {
+  return ROUTINE_WORK_PATTERN.test(title);
+}
+
+function looksLikeProse(title: string): boolean {
+  return title.length > 110 || PROSE_PATTERN.test(title);
+}
+
+
+function isImportantEventTitle(title: string): boolean {
+  if (isRoutineWork(title)) return false;
+  if (looksLikeProse(title)) return false;
+  if (isImportantSyllabusEvent(title)) return true;
+  return TRUE_IMPORTANT_DATE_PATTERN.test(title);
+}
+
 function isImportantAssessment(title: string, kind?: string): boolean {
-  if (ROUTINE_WORK_PATTERN.test(title)) return false;
+  if (looksLikeProse(title)) return false;
+  if (isRoutineWork(title)) return false;
   if (kind === "QUIZ" || kind === "TEST") return true;
   return ASSESSMENT_PATTERN.test(title);
 }
@@ -162,6 +191,114 @@ function findAssignmentDate(
   return match?.dueDate ?? undefined;
 }
 
+function inferPortalYear(portal: CourseInfoPortal): number {
+  if (portal.course.startDate) {
+    const year = new Date(portal.course.startDate).getFullYear();
+    if (!Number.isNaN(year)) return year;
+  }
+  return new Date().getFullYear();
+}
+
+interface ImportantDateEntry {
+  id: string;
+  title: string;
+  date?: string;
+  sourceType: string;
+}
+
+function collectImportantDateEntries(
+  portal: CourseInfoPortal,
+  item: CourseInfoPortal["sections"][0]["items"][0],
+  index: number,
+): ImportantDateEntry[] {
+  const entries: ImportantDateEntry[] = [];
+  const seen = new Set<string>();
+  const pushEntry = (title: string, date?: string, suffix = "") => {
+    const trimmed = title.trim();
+    if (!trimmed || trimmed.length < 4) return;
+    const key = titleKey(trimmed);
+    if (seen.has(key)) return;
+    seen.add(key);
+    entries.push({
+      id: `important-date-${index}-${key.slice(0, 24)}${suffix}`,
+      title: trimmed,
+      date,
+      sourceType: item.source.type,
+    });
+  };
+
+  const isGenericChapterTitle = GENERIC_DATE_SECTION_TITLE.test(item.title.trim());
+  if (!isGenericChapterTitle) {
+    pushEntry(item.title, item.date, "-title");
+  }
+
+  if (item.body?.trim()) {
+    const extracted = extractSyllabusDateItemsFromText(
+      item.body,
+      item.source.label ?? "Important Dates",
+      inferPortalYear(portal),
+    );
+    for (const line of extracted) {
+      pushEntry(line.title, line.date, "-extracted");
+    }
+
+    for (const rawLine of item.body.split(/\n/)) {
+      const line = rawLine.replace(/^[\s•\-*\d.)]+/, "").trim();
+      if (line.length < 8 || line.length > 200) continue;
+      if (!isImportantEventTitle(line) && !isImportantAssessment(line)) continue;
+      pushEntry(line, findDateInLine(line, inferPortalYear(portal)) ?? undefined, "-line");
+    }
+  }
+
+  return entries;
+}
+
+function findDateInLine(line: string, year: number): string | undefined {
+  const extracted = extractSyllabusDateItemsFromText(line, "inline", year);
+  return extracted[0]?.date;
+}
+
+function routeImportantDateEntry(
+  entry: ImportantDateEntry,
+  assessmentMap: Map<string, CourseHighlightDate>,
+  eventMap: Map<string, CourseHighlightDate>,
+  assignments: AssignmentLike[],
+) {
+  if (entry.sourceType === "moodle_assignment" || isRoutineWork(entry.title)) return;
+
+  if (isImportantAssessment(entry.title)) {
+    pushAssessment(assessmentMap, {
+      id: entry.id,
+      title: entry.title,
+      date: entry.date ?? findAssignmentDate(entry.title, assignments),
+    });
+    return;
+  }
+
+  if (!isImportantEventTitle(entry.title)) return;
+
+  pushEvent(eventMap, {
+    id: entry.id,
+    title: entry.title,
+    date: entry.date,
+  });
+}
+
+function pushEvent(
+  map: Map<string, CourseHighlightDate>,
+  item: { id: string; title: string; date?: string },
+) {
+  const key = titleKey(item.title);
+  const existing = map.get(key);
+  if (existing && existing.date && !item.date) return;
+  map.set(key, {
+    id: item.id,
+    title: normalizeTitle(item.title),
+    date: item.date ?? existing?.date,
+    daysUntil: item.date ? daysUntil(item.date) : existing?.daysUntil,
+  });
+}
+
 function pushAssessment(
   map: Map<string, CourseHighlightDate>,
   item: { id: string; title: string; date?: string },
@@ -183,11 +320,14 @@ export function buildCourseHighlights(
   instructor: string | null,
 ): CourseHighlights {
   const assessmentMap = new Map<string, CourseHighlightDate>();
+  const eventMap = new Map<string, CourseHighlightDate>();
   let whatYouNeed: WhatYouNeedGroup[] = [];
   let gradingSnapshot: string | undefined;
+  let thisWeeksHaul: WeeklyHaulBlock | null = null;
 
   if (portal) {
     whatYouNeed = buildWhatYouNeed(portal);
+    thisWeeksHaul = buildWeeklyHaulFromPortal(portal);
 
     const grading = sectionItems(portal, "grading")[0];
     if (grading?.body) {
@@ -210,26 +350,9 @@ export function buildCourseHighlights(
       });
     }
 
-    for (const item of sectionItems(portal, "important-dates")) {
-      if (!isImportantAssessment(item.title)) continue;
-      pushAssessment(assessmentMap, {
-        id: `date-${item.title}-${item.date ?? "nodate"}`,
-        title: item.title,
-        date: item.date ?? findAssignmentDate(item.title, assignments),
-      });
-    }
-
-    for (const section of portal.sections) {
-      for (const item of section.items) {
-        if (!item.body || !ASSESSMENT_PATTERN.test(item.body)) continue;
-        const lines = pickMatchingLines(item.body, [ASSESSMENT_PATTERN], 4);
-        for (const line of lines) {
-          if (!isImportantAssessment(line)) continue;
-          pushAssessment(assessmentMap, {
-            id: `body-${section.id}-${line.slice(0, 40)}`,
-            title: line.slice(0, 120),
-          });
-        }
+    for (const [index, item] of sectionItems(portal, "important-dates").entries()) {
+      for (const entry of collectImportantDateEntries(portal, item, index)) {
+        routeImportantDateEntry(entry, assessmentMap, eventMap, assignments);
       }
     }
   }
@@ -250,6 +373,15 @@ export function buildCourseHighlights(
     return a.title.localeCompare(b.title);
   });
 
+  const importantEvents = [...eventMap.values()]
+    .filter((item) => !assessmentMap.has(titleKey(item.title)))
+    .sort((a, b) => {
+      if (a.date && b.date) return a.date.localeCompare(b.date);
+      if (a.date) return -1;
+      if (b.date) return 1;
+      return a.title.localeCompare(b.title);
+    });
+
   const instructorFromPortal = portal
     ? sectionItems(portal, "instructor")[0]?.body
         ?.split("\n")
@@ -262,6 +394,8 @@ export function buildCourseHighlights(
     termEnd: portal?.course.endDate,
     instructor: instructor?.trim() || instructorFromPortal || undefined,
     importantAssessments,
+    importantEvents,
+    thisWeeksHaul,
     whatYouNeed,
     gradingSnapshot,
     hasPortal: Boolean(portal),

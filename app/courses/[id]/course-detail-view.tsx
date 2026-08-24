@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 
 import { CourseProgressStory } from "@/components/courses/CourseProgressStory";
-import { CourseHeadlines } from "@/components/courses/CourseHeadlines";
+import { CourseDashboard } from "@/components/courses/CourseDashboard";
 import { CourseInfoView } from "@/components/courses/CourseInfoView";
 import { MaterialOpenActions } from "@/components/materials/MaterialOpenActions";
 import { BreakDownButton } from "@/components/study/BreakDownButton";
@@ -138,6 +138,32 @@ export function CourseDetailView({
   const searchParams = useSearchParams();
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"overview" | "course-info">("overview");
+  const [courseInfoJson, setCourseInfoJson] = useState(course.courseInfoJson);
+
+  useEffect(() => {
+    setCourseInfoJson(course.courseInfoJson);
+  }, [course.courseInfoJson]);
+
+  useEffect(() => {
+    if (!course.moodleCourseId) return;
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const response = await fetch(`/api/courses/${course.id}/course-info`);
+        const data = await response.json();
+        if (!cancelled && data.success && data.portal) {
+          setCourseInfoJson(JSON.stringify(data.portal));
+        }
+      } catch {
+        // Keep SSR courseInfoJson on failure
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [course.id, course.moodleCourseId]);
 
   useEffect(() => {
     const tab = searchParams.get("tab");
@@ -262,13 +288,15 @@ export function CourseDetailView({
           </div>
         </header>
 
-        <CourseHeadlines
-          courseInfoJson={course.courseInfoJson}
+        <CourseDashboard
+          courseId={course.id}
+          courseInfoJson={courseInfoJson}
           assignments={course.assignments}
           instructor={course.instructor}
+          meetings={course.meetings}
           accentColor={course.color}
           onViewFullSyllabus={
-            course.moodleCourseId || course.courseInfoJson
+            course.moodleCourseId || courseInfoJson
               ? () => setActiveTab("course-info")
               : undefined
           }
@@ -284,7 +312,7 @@ export function CourseDetailView({
                 : "text-stone-500 hover:text-stone-800"
             }`}
           >
-            Overview
+            Dashboard
           </button>
           <button
             type="button"
@@ -295,7 +323,7 @@ export function CourseDetailView({
                 : "text-stone-500 hover:text-stone-800"
             }`}
           >
-            Full syllabus
+            Full syllabus & details
           </button>
         </div>
 

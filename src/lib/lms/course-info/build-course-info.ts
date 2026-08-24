@@ -12,6 +12,7 @@ import {
 } from "@/lib/lms/moodle-syllabus";
 
 import { fetchPluginFileText, htmlToPlainText, unixToIso } from "./html";
+import { extractSyllabusDateItemsFromText } from "./syllabus-dates";
 import type { CourseInfoItem, CourseInfoPortal, CourseInfoSection } from "./types";
 
 const SYLLABUS_PATTERN = /\b(syllabus|course outline|course information|course info)\b/i;
@@ -46,6 +47,7 @@ function sectionTitle(id: string): string {
     projects: "Projects & Presentations",
     media: "Podcasts & Media",
     resources: "Course Resources",
+    announcements: "Announcements",
     faq: "Q&A / FAQ",
     other: "Other Information",
   };
@@ -54,7 +56,9 @@ function sectionTitle(id: string): string {
 
 function classifyLabel(text: string): string {
   const t = text.toLowerCase();
-  if (/important date|course schedule|academic calendar/.test(t)) return "important-dates";
+  if (/important date|course schedule|academic calendar|weekly schedule|week\s+\d+/.test(t)) {
+    return "important-dates";
+  }
   if (/instructor|professor|office hour|about your/.test(t)) return "instructor";
   if (/grading|grade breakdown|grade scale/.test(t)) return "grading";
   if (/polic|academic integrity|incomplete work|diversity statement|accessibility/.test(t)) {
@@ -325,6 +329,21 @@ export async function buildCourseInfoPortal(input: {
       }
     }
 
+    if (mod.modname === "forum") {
+      const body = mod.description ? htmlToPlainText(mod.description) : undefined;
+      addItem(buckets, "announcements", {
+        title: mod.name,
+        body,
+        kind: "text",
+        source: {
+          type: "moodle_module",
+          label: mod.sectionName,
+          url: mod.url ?? undefined,
+        },
+        moodleRef: { modname: "forum", cmid: mod.id, instance: mod.instance },
+      });
+    }
+
     if (mod.modname === "quiz") {
       addItem(buckets, "quizzes", {
         title: mod.name,
@@ -423,7 +442,22 @@ export async function buildCourseInfoPortal(input: {
   }
 
   const mergedDates = mergeDateItems(dateItems);
-  for (const item of mergedDates) {
+
+  const syllabusYear = courseMeta?.startdate
+    ? new Date(unixToIso(courseMeta.startdate) ?? "").getFullYear()
+    : new Date().getFullYear();
+  const syllabusDates: CourseInfoItem[] = [];
+  for (const bucket of buckets.values()) {
+    for (const item of bucket.items) {
+      if (!item.body?.trim()) continue;
+      syllabusDates.push(
+        ...extractSyllabusDateItemsFromText(item.body, item.source.label, syllabusYear),
+      );
+    }
+  }
+
+  const allDates = mergeDateItems([...mergedDates, ...syllabusDates]);
+  for (const item of allDates) {
     addItem(buckets, "important-dates", item);
   }
 
@@ -446,6 +480,7 @@ export async function buildCourseInfoPortal(input: {
         "etiquette",
         "technology",
         "resources",
+        "announcements",
         "faq",
         "other",
       ];

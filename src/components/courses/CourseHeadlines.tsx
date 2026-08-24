@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { CalendarRange, ClipboardCheck, GraduationCap, Laptop, Package } from "lucide-react";
+import { CalendarRange, ClipboardCheck, GraduationCap, Laptop, Package, Truck } from "lucide-react";
 
 import {
   buildCourseHighlightsFromJson,
@@ -89,6 +89,29 @@ export function CourseHeadlines({
           </p>
         ) : null}
 
+        {highlights.thisWeeksHaul && highlights.thisWeeksHaul.objectives.length > 0 ? (
+          <div className="mt-6 rounded-2xl border border-teal-200 bg-gradient-to-br from-teal-50/90 to-white p-5 shadow-sm">
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <Truck className="h-5 w-5 text-teal-700" />
+              <h3 className="text-base font-bold text-stone-900">This week&apos;s haul</h3>
+              <span className="rounded-full bg-teal-100 px-2.5 py-0.5 text-xs font-semibold text-teal-800">
+                {highlights.thisWeeksHaul.label}
+              </span>
+            </div>
+            <ul className="space-y-2">
+              {highlights.thisWeeksHaul.objectives.map((objective) => (
+                <li
+                  key={objective}
+                  className="flex gap-2 rounded-xl border border-teal-100 bg-white/80 px-3 py-2.5 text-sm text-stone-800"
+                >
+                  <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-teal-600" />
+                  <span>{objective}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
         <div className="mt-6 grid gap-5 lg:grid-cols-2">
           <HighlightPanel
             icon={ClipboardCheck}
@@ -114,6 +137,35 @@ export function CourseHeadlines({
                       <p className="mt-0.5 text-sm text-violet-700">
                         Date in syllabus — see assignments for due dates
                       </p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </HighlightPanel>
+
+          <HighlightPanel
+            icon={CalendarRange}
+            title="Important dates & sessions"
+            empty="No syllabus events found yet — sync Moodle to refresh."
+          >
+            {highlights.importantEvents.length > 0 ? (
+              <ul className="space-y-2">
+                {highlights.importantEvents.map((item) => (
+                  <li
+                    key={item.id}
+                    className="rounded-2xl border border-amber-200 bg-amber-50/70 px-4 py-3"
+                  >
+                    <p className="font-semibold text-amber-950">{item.title}</p>
+                    {item.date ? (
+                      <p className="mt-0.5 text-sm text-amber-800">
+                        {formatHeadlineDate(item.date)}
+                        {item.daysUntil !== undefined
+                          ? ` · ${formatDaysUntilLabel(item.daysUntil)}`
+                          : null}
+                      </p>
+                    ) : (
+                      <p className="mt-0.5 text-sm text-amber-700">See full syllabus for timing</p>
                     )}
                   </li>
                 ))}
@@ -236,6 +288,8 @@ function hasVisibleHighlights(highlights: CourseHighlights): boolean {
   return (
     highlights.hasPortal ||
     highlights.importantAssessments.length > 0 ||
+    highlights.importantEvents.length > 0 ||
+    Boolean(highlights.thisWeeksHaul?.objectives.length) ||
     highlights.whatYouNeed.length > 0 ||
     Boolean(highlights.gradingSnapshot) ||
     Boolean(highlights.termStart) ||

@@ -9,6 +9,7 @@ import {
   aiSourceInstruction,
   getUserAppSettings,
 } from "@/lib/settings/app-settings";
+import { portalToContextText } from "@/lib/lms/course-info/portal-context";
 import { getOrCreateDefaultUser } from "@/lib/user";
 
 export async function POST(request: Request) {
@@ -87,7 +88,7 @@ export async function POST(request: Request) {
         courseId
           ? db.course.findFirst({
               where: { id: courseId, userId: user.id },
-              select: { title: true },
+              select: { title: true, courseInfoJson: true },
             })
           : Promise.resolve(null),
       ]);
@@ -123,9 +124,17 @@ export async function POST(request: Request) {
       .map((topic) => `${topic.name} (${topic.course.title}): ${topic.description ?? ""}`)
       .join("; ");
 
+    let portalContext = "";
+    if (courseId && focusedCourse && "courseInfoJson" in focusedCourse && focusedCourse.courseInfoJson) {
+      portalContext = portalToContextText(focusedCourse.courseInfoJson);
+    }
+
     const context = [
       focusedCourse
         ? `Focused class: ${focusedCourse.title} — prioritize this course in your answer.`
+        : null,
+      portalContext
+        ? `Imported course syllabus portal (use only this data — do not invent missing facts):\n${portalContext}`
         : null,
       `Student courses: ${courseContext || "none"}`,
       `Learning topics: ${topicContext || "none"}`,
