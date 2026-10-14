@@ -22,7 +22,7 @@ function formatTime(time: string | null | undefined) {
   const [hours, minutes] = time.split(":").map(Number);
   const date = new Date();
   date.setHours(hours, minutes, 0, 0);
-  return date.toLocaleTimeString(undefined, {
+  return date.toLocaleTimeString("en-US", {
     hour: "numeric",
     minute: "2-digit",
   });
@@ -39,7 +39,7 @@ export function ElementaryTodaySchedule({
   selectedEventId?: string | null;
   onSelectEvent?: (id: string) => void;
 }) {
-  const todayLabel = new Date().toLocaleDateString(undefined, {
+  const todayLabel = new Date().toLocaleDateString("en-US", {
     weekday: "long",
     month: "long",
     day: "numeric",

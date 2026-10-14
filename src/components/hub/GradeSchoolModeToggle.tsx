@@ -3,34 +3,44 @@
 import { GraduationCap } from "lucide-react";
 import { useRouter } from "next/navigation";
 
+import { ClientIcon } from "@/components/ui/ClientIcon";
+import { useTapHandler } from "@/hooks/useTapHandler";
 import { useTheme } from "@/lib/theme/ThemeProvider";
 
 export function GradeSchoolModeToggle() {
-  const { settings, updateSettings, loading } = useTheme();
+  const { settings, updateSettings } = useTheme();
   const router = useRouter();
   const on = settings.elementaryMode;
 
-  async function handleToggle() {
-    await updateSettings({ elementaryMode: !on });
-    router.refresh();
-  }
+  const onTap = useTapHandler(() => {
+    void (async () => {
+      const next = !on;
+      await updateSettings({ elementaryMode: next });
+      if (typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches) {
+        router.refresh();
+      }
+    })();
+  });
 
   return (
     <button
       type="button"
-      onClick={() => void handleToggle()}
-      disabled={loading}
+      {...onTap}
       role="switch"
       aria-checked={on}
+      suppressHydrationWarning
       aria-label={on ? "Grade school mode on" : "Turn on grade school mode"}
       title={on ? "Grade school mode on — click for standard hub" : "Turn on grade school mode"}
-      className={`inline-flex items-center gap-2 rounded-xl border p-2.5 transition disabled:opacity-60 sm:pr-3 ${
+      className={`inline-flex cursor-pointer items-center gap-2 rounded-xl border p-2.5 transition touch-manipulation sm:pr-3 ${
         on
           ? "border-teal-300 bg-teal-50 text-teal-800 shadow-sm shadow-teal-100 hover:bg-teal-100"
           : "border-brand bg-white text-stone-500 hover:bg-brand-soft"
       }`}
     >
-      <GraduationCap className={`h-5 w-5 shrink-0 ${on ? "text-teal-700" : "text-stone-500"}`} />
+      <ClientIcon
+        icon={GraduationCap}
+        className={`h-5 w-5 shrink-0 ${on ? "text-teal-700" : "text-stone-500"}`}
+      />
       {on ? (
         <span className="hidden text-sm font-semibold sm:inline">Grade school</span>
       ) : null}

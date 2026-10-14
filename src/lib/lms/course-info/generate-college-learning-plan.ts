@@ -76,6 +76,7 @@ function fallbackPlan(courseName: string, context: string): CollegeLearningPlan 
 export async function generateCollegeLearningPlan(input: {
   courseName: string;
   courseInfoJson: string | null | undefined;
+  includeOpenAIPro?: boolean;
 }): Promise<CollegeLearningPlan> {
   const context = portalToContextText(input.courseInfoJson, 14_000);
   if (!context) {
@@ -109,7 +110,7 @@ IMPORTED COURSE DATA:
 ${context}`,
         },
       ],
-      { temperature: 0.3, maxTokens: 8000, jsonMode: true },
+      { temperature: 0.3, maxTokens: 8000, jsonMode: true, includeOpenAIPro: input.includeOpenAIPro },
     );
 
     const parsed = parseAiJson<CollegeLearningPlan>(result.content);

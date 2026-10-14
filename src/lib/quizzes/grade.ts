@@ -16,6 +16,7 @@ export async function gradeQuizAnswers(
     explanation: string | null;
   }>,
   answers: Array<{ questionId: string; answer: string | string[] | boolean }>,
+  options?: { includeOpenAIPro?: boolean },
 ): Promise<GradedResponse[]> {
   const results: GradedResponse[] = [];
 
@@ -37,7 +38,7 @@ export async function gradeQuizAnswers(
       question.type === "SHORT_ANSWER" ||
       question.type === "SCENARIO"
     ) {
-      const graded = await gradeShortAnswer(question, userAnswer);
+      const graded = await gradeShortAnswer(question, userAnswer, options);
       results.push(graded);
       continue;
     }
@@ -70,6 +71,7 @@ async function gradeShortAnswer(
     explanation: string | null;
   },
   userAnswer: string | string[] | boolean,
+  options?: { includeOpenAIPro?: boolean },
 ): Promise<GradedResponse> {
   const expected = parseAnswer(question.correctAnswer);
   const answerText = Array.isArray(userAnswer)
@@ -106,7 +108,11 @@ Return ONLY JSON:
 { "isCorrect": true|false, "feedback": "brief helpful feedback" }`,
         },
       ],
-      { temperature: 0.1, maxTokens: 256 },
+      {
+        temperature: 0.1,
+        maxTokens: 256,
+        includeOpenAIPro: options?.includeOpenAIPro,
+      },
     );
 
     const parsed = JSON.parse(

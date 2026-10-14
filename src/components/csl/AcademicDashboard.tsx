@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { TOPIC_PROGRESS_LEARNER_COPY } from "@/lib/learning/mastery/mastery-truth";
 
 interface DashboardStats {
   overallMastery: number;
@@ -40,7 +41,7 @@ export function AcademicDashboard({ initialStats }: AcademicDashboardProps) {
         <Metric label="Courses" value={stats.activeCoursesCount} />
         <Metric label="Pending" value={stats.pendingAssignments} />
         <Metric label="Cards due" value={stats.dueFlashcards} accent="amber" />
-        <Metric label="Mastery" value={`${stats.overallMastery}%`} accent="indigo" />
+        <Metric label={TOPIC_PROGRESS_LEARNER_COPY.dashboardMetricLabel} value={`${stats.overallMastery}%`} accent="indigo" />
       </div>
 
       {stats.upcomingAssignment ? (

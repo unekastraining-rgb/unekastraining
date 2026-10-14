@@ -1,12 +1,13 @@
 import { computePriority } from "@/lib/academic";
 import type { HubAssignment } from "@/components/hub/types";
+import { localDateKey } from "@/lib/calendar/types";
 
 const OPEN_STATUSES = new Set(["NOT_STARTED", "IN_PROGRESS"]);
 
 function weekEndKey(todayKey: string): string {
   const end = new Date(`${todayKey}T12:00:00`);
   end.setDate(end.getDate() + 7);
-  return end.toISOString().slice(0, 10);
+  return localDateKey(end);
 }
 
 function isExamKind(kind?: string): boolean {

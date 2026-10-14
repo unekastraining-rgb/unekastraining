@@ -89,6 +89,7 @@ export function CoreAdaptivePanel({
   useEffect(() => {
     if (recommendations.length > 0 || dismissed) return;
     if (courseId || materialId || sourcePreview) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- async data load on mount or dependency change
       void runAnalysis();
     }
   }, [courseId, materialId, sourcePreview, recommendations.length, dismissed, runAnalysis]);
@@ -262,7 +263,7 @@ export function CoreAdaptivePanel({
             <div className="space-y-3 rounded-xl border border-orange-100 bg-orange-50/30 p-3">
               <p className="text-xs text-stone-600">
                 Select multiple formats, then add them as draggable blocks on the same page — like
-                Goodnotes. Use Tools for photos and canvas starters for sticky layouts.
+                Goodnotes. Use Inserts for photos and canvas starters for sticky layouts.
               </p>
               {(
                 Object.entries(grouped) as Array<

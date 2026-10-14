@@ -91,6 +91,7 @@ export function EventFormModal({
     const start = initial?.startAt ? new Date(initial.startAt) : new Date();
     const end = initial?.endAt ? new Date(initial.endAt) : new Date(start.getTime() + 60 * 60 * 1000);
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync UI state to props or external subscription
     setTitle(initial?.title ?? "");
     setDescription(initial?.description ?? "");
     setCourseId(initial?.courseId ?? "");
@@ -170,7 +171,7 @@ export function EventFormModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40 p-4 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[600] flex items-center justify-center bg-stone-900/40 p-4 backdrop-blur-sm">
       <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-3xl border border-orange-100 bg-white shadow-2xl">
         <div className="flex items-center justify-between border-b border-orange-100 px-6 py-4">
           <h2 className="text-lg font-bold text-stone-900">

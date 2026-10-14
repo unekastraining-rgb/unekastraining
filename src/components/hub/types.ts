@@ -3,6 +3,7 @@ import type { AppNotification } from "@/lib/notifications";
 import type { ProgressSnapshot } from "@/lib/csl/progress";
 import type { HubTelemetrySnapshot } from "@/lib/csl/study-sessions";
 import type { GeneratedCurriculum } from "@/lib/syllabus/types";
+import type { WeeklyCollegeGrid } from "@/lib/schedule/weekly-college-grid";
 import type { CalendarEvent } from "@/lib/calendar/types";
 
 export type HubTab = "hub" | "classes" | "locker" | "chat" | "settings";
@@ -17,6 +18,8 @@ export interface HubCourse {
   assignmentCount: number;
   materialCount: number;
   meetingCount: number;
+  /** Syllabus / LMS topic names for Core→Six→Lucky cold start */
+  topics?: string[];
 }
 
 export interface HubAssignment {
@@ -32,6 +35,12 @@ export interface HubAssignment {
   courseTitle: string;
   courseColor: string | null;
   source?: "syllabus" | "manual" | "lms";
+  /**
+   * 2P-31 — optional owned Concept when assignment title matches a Topic
+   * that already has conceptId. Never invented from grade/status.
+   */
+  conceptId?: string | null;
+  topicId?: string | null;
 }
 
 export interface HubMeeting {
@@ -72,6 +81,8 @@ export interface HubJumpBackIn {
   title: string;
   subtitle: string;
   href: string;
+  courseId?: string | null;
+  topic?: string | null;
 }
 
 export interface HubGradeSchoolPlan {
@@ -92,9 +103,12 @@ export interface HubData {
   meetings: HubMeeting[];
   materials: HubMaterial[];
   todayCalendarEvents: CalendarEvent[];
+  /** Local calendar date (YYYY-MM-DD) from server — keeps due labels in sync with today's schedule. */
+  todayKey: string;
   stats: HubStats;
   attention: AttentionItem[];
   progress: ProgressSnapshot;
   telemetry: HubTelemetrySnapshot;
   gradeSchoolPlans: HubGradeSchoolPlan[];
+  weeklySchedule: WeeklyCollegeGrid | null;
 }

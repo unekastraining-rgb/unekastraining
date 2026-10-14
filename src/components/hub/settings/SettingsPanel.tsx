@@ -20,6 +20,21 @@ import { PaletteLibrary } from "@/components/customization/PaletteLibrary";
 import { ColorPicker } from "@/components/customization/ColorPicker";
 import { syncMoodleFromBrowser } from "@/lib/lms/moodle-browser-sync";
 
+function parseLmsColdStartCourses(
+  value: unknown,
+): Array<{ id: string; title: string; focusTopic: string | null }> {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (course): course is { id: string; title: string; focusTopic: string | null } =>
+      typeof course === "object" &&
+      course !== null &&
+      typeof (course as { id?: string }).id === "string" &&
+      typeof (course as { title?: string }).title === "string" &&
+      ((course as { focusTopic?: unknown }).focusTopic === null ||
+        typeof (course as { focusTopic?: unknown }).focusTopic === "string"),
+  );
+}
+
 export function SettingsPanel() {
   const router = useRouter();
   const { settings, updateSettings, loading } = useTheme();
@@ -27,11 +42,23 @@ export function SettingsPanel() {
   const [lmsToken, setLmsToken] = useState("");
   const [selectedProvider, setSelectedProvider] = useState(LMS_PROVIDERS[0].id);
   const [lmsMessage, setLmsMessage] = useState<string | null>(null);
+  const [lmsColdStartCourses, setLmsColdStartCourses] = useState<
+    Array<{ id: string; title: string; focusTopic: string | null }>
+  >([]);
   const [testingBlackboard, setTestingBlackboard] = useState(false);
+  const [testingCanvas, setTestingCanvas] = useState(false);
   const [testingMoodle, setTestingMoodle] = useState(false);
   const [syncingMoodle, setSyncingMoodle] = useState(false);
   const [appSettings, setAppSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
   const [savingAi, setSavingAi] = useState(false);
+  const [aiProviders, setAiProviders] = useState<{
+    gemini: boolean;
+    groq: boolean;
+    openrouter: boolean;
+    openai: boolean;
+    activeChain: string[];
+  } | null>(null);
+  const [envCopyMessage, setEnvCopyMessage] = useState<string | null>(null);
   const [connections, setConnections] = useState<
     Array<{
       id: string;
@@ -48,6 +75,7 @@ export function SettingsPanel() {
     const lmsError = params.get("lmsError");
     const lmsSync = params.get("lmsSync");
     if (connected) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync UI state to props or external subscription
       setLmsMessage(lmsSync ?? "LMS connected and synced.");
       router.replace(hubTabPath("settings"), { scroll: false });
     }
@@ -57,6 +85,7 @@ export function SettingsPanel() {
       .then((response) => response.json())
       .then((data) => {
         if (data.success && data.appSettings) setAppSettings(data.appSettings);
+        if (data.success && data.aiProviders) setAiProviders(data.aiProviders);
       })
       .catch(() => {});
 
@@ -101,6 +130,9 @@ export function SettingsPanel() {
       ]);
       if (selectedProvider === "MOODLE" && (lmsUrl.trim() || lmsToken.trim())) {
         await syncMoodleBrowser();
+      } else if (selectedProvider !== "MOODLE") {
+        // Canvas/Blackboard/Google auto-sync on save — refresh hub so Study Now sees new topics.
+        router.refresh();
       }
     }
   }
@@ -111,6 +143,7 @@ export function SettingsPanel() {
       return;
     }
 
+    setLmsColdStartCourses([]);
     const response = await fetch("/api/lms/sync", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -118,12 +151,14 @@ export function SettingsPanel() {
     });
     const data = await response.json();
     setLmsMessage(data.result?.message ?? data.error ?? "Sync finished.");
+    setLmsColdStartCourses(parseLmsColdStartCourses(data.result?.coldStartCourses));
     if (data.success) router.refresh();
   }
 
   async function syncMoodleBrowser() {
     setSyncingMoodle(true);
     setLmsMessage(null);
+    setLmsColdStartCourses([]);
     try {
       let baseUrl = lmsUrl.trim();
       let token = lmsToken.trim();
@@ -141,6 +176,7 @@ export function SettingsPanel() {
 
       const result = await syncMoodleFromBrowser(baseUrl, token);
       setLmsMessage(result.message);
+      setLmsColdStartCourses(parseLmsColdStartCourses(result.coldStartCourses));
       router.refresh();
     } catch (error) {
       setLmsMessage(
@@ -204,6 +240,40 @@ export function SettingsPanel() {
       setLmsMessage("Moodle test failed — check your URL and token.");
     } finally {
       setTestingMoodle(false);
+    }
+  }
+
+  async function testCanvasConnection() {
+    setTestingCanvas(true);
+    setLmsMessage(null);
+    try {
+      const response = await fetch("/api/lms/canvas/diagnose", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          baseUrl: lmsUrl || undefined,
+          accessToken: lmsToken || undefined,
+        }),
+      });
+      const data = await response.json();
+      if (!data.success && !data.report) {
+        setLmsMessage(data.error ?? "Canvas test failed.");
+        return;
+      }
+
+      const lines = (data.report?.steps ?? []).map(
+        (step: { ok: boolean; label: string; detail?: string }) =>
+          `${step.ok ? "✓" : "✗"} ${step.label}${step.detail ? ` — ${step.detail}` : ""}`,
+      );
+      const allOk = (data.report?.steps ?? []).every((step: { ok: boolean }) => step.ok);
+      const footer = allOk
+        ? "\nNext: tap Save connection (auto-sync) or Sync now — then Blurt / Study Now use imported topics."
+        : "";
+      setLmsMessage([data.report?.summary, ...lines, footer].filter(Boolean).join("\n"));
+    } catch {
+      setLmsMessage("Canvas test failed — check your URL and token.");
+    } finally {
+      setTestingCanvas(false);
     }
   }
 
@@ -287,7 +357,7 @@ export function SettingsPanel() {
               }
               className={`rounded-2xl border p-4 text-left transition ${
                 settings.themeTemplate === template.id
-                  ? "border-[color-mix(in_srgb,var(--sh-primary)_45%,transparent)] ring-2 ring-[color-mix(in_srgb,var(--sh-primary)_18%,transparent)]"
+                  ? "hub-theme-template-selected"
                   : "border-brand hover:brightness-[0.98]"
               }`}
             >
@@ -330,7 +400,7 @@ export function SettingsPanel() {
             Applies across the hub, calendar, Core, and any page with colors & templates.
           </p>
           <div className="mt-3 max-h-96 overflow-y-auto">
-            <PaletteLibrary applyGlobally={false} />
+            <PaletteLibrary applyGlobally />
           </div>
         </div>
       </section>
@@ -403,7 +473,7 @@ export function SettingsPanel() {
                 onClick={() => void updateSettings({ defaultQuickView: view })}
                 className={`rounded-full px-4 py-2 text-sm font-semibold ${
                   settings.defaultQuickView === view
-                    ? "bg-brand-soft0 text-white"
+                    ? "bg-[var(--sh-primary,#ea580c)] text-white"
                     : "border border-brand text-stone-700"
                 }`}
               >
@@ -456,7 +526,11 @@ export function SettingsPanel() {
           <div>
             <h3 className="text-xl font-bold text-stone-900">AI source control</h3>
             <p className="text-sm text-stone-500">
-              Global setting for Chat, quizzes, flashcards, blurting, and teach-back.
+              Global grounding for Chat, quizzes, flashcards, blurting, and teach-back. Free
+              default: Gemini → Groq → OpenRouter (ChatGPT-level results without OpenAI). OpenAI
+              is optional Pro via the toggle below (needs <code className="text-xs">OPENAI_API_KEY</code>
+              ), or ops can pin <code className="text-xs">AI_PROVIDER_CHAIN</code>. Separate from
+              Core material import: choose With AI / Without AI when you open a material.
             </p>
           </div>
         </div>
@@ -503,6 +577,141 @@ export function SettingsPanel() {
             />
             Include uploaded course materials in Chat context
           </label>
+
+          <label className="flex items-start gap-2 text-sm text-stone-600">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={appSettings.aiUseOpenAIPro}
+              onChange={(event) =>
+                void saveAiSettings({
+                  aiUseOpenAIPro: event.target.checked,
+                })
+              }
+            />
+            <span>
+              Use OpenAI as Pro fallback after free providers (quizzes, blurting). Requires{" "}
+              <code className="text-xs">OPENAI_API_KEY</code> in{" "}
+              <code className="text-xs">.env</code>. Off by default so free Gemini → Groq →
+              OpenRouter stays the main path.
+            </span>
+          </label>
+
+          {aiProviders ? (
+            <div className="rounded-xl border border-brand bg-brand-soft/40 px-4 py-3 text-sm text-stone-700">
+              <p className="text-xs font-bold uppercase tracking-wider text-stone-500">
+                Free-tier AI keys (.env)
+              </p>
+              <ul className="mt-2 space-y-1 text-xs">
+                <li>
+                  {aiProviders.gemini ? "✓" : "○"} Gemini{" "}
+                  {aiProviders.gemini ? (
+                    "ready"
+                  ) : (
+                    <>
+                      — add <code className="text-xs">GEMINI_API_KEY</code> (
+                      <a
+                        href="https://aistudio.google.com/apikey"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-semibold text-brand hover:underline"
+                      >
+                        free key
+                      </a>
+                      )
+                    </>
+                  )}
+                </li>
+                <li>
+                  {aiProviders.groq ? "✓" : "○"} Groq{" "}
+                  {aiProviders.groq ? (
+                    "ready"
+                  ) : (
+                    <>
+                      — add <code className="text-xs">GROQ_API_KEY</code> (
+                      <a
+                        href="https://console.groq.com/keys"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-semibold text-brand hover:underline"
+                      >
+                        free key
+                      </a>
+                      ) for failover
+                    </>
+                  )}
+                </li>
+                <li>
+                  {aiProviders.openrouter ? "✓" : "○"} OpenRouter{" "}
+                  {aiProviders.openrouter ? (
+                    "ready"
+                  ) : (
+                    <>
+                      — add <code className="text-xs">OPENROUTER_API_KEY</code> (
+                      <a
+                        href="https://openrouter.ai/settings/keys"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-semibold text-brand hover:underline"
+                      >
+                        free :free models
+                      </a>
+                      ) for failover
+                    </>
+                  )}
+                </li>
+                <li>
+                  {aiProviders.openai ? "✓" : "○"} OpenAI{" "}
+                  {aiProviders.openai
+                    ? "key present (Pro toggle above)"
+                    : "optional Pro"}
+                </li>
+              </ul>
+              <p className="mt-2 text-xs text-stone-600">
+                Active chain:{" "}
+                <span className="font-semibold">
+                  {aiProviders.activeChain.length > 0
+                    ? aiProviders.activeChain.join(" → ")
+                    : "none configured"}
+                </span>
+                {!aiProviders.groq && !aiProviders.openrouter && aiProviders.gemini
+                  ? ". Only Gemini is keyed — when its free quota runs out, Lucky falls back to your syllabus topic bank until you add Groq or OpenRouter."
+                  : null}
+              </p>
+              <p className="mt-2 text-[11px] text-stone-500">
+                After updating <code className="text-xs">.env</code>, restart the dev server and run{" "}
+                <code className="text-xs">npm run audit:strategy</code>{" "}
+                (tests, cold-start smoke, chain check, quiz smoke; failover when keyed) or{" "}
+                <code className="text-xs">npm run check:strategy-live</code>{" "}
+                in the project folder to verify quiz quality and failover.
+              </p>
+              {!aiProviders.groq || !aiProviders.openrouter ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const snippet = [
+                      "AI_PROVIDER_CHAIN=gemini,groq,openrouter",
+                      "GROQ_API_KEY=",
+                      "OPENROUTER_API_KEY=",
+                    ].join("\n");
+                    void navigator.clipboard.writeText(snippet).then(
+                      () => {
+                        setEnvCopyMessage("Copied failover .env lines — paste into .env and add your keys.");
+                        window.setTimeout(() => setEnvCopyMessage(null), 4000);
+                      },
+                      () => setEnvCopyMessage("Could not copy — add GROQ_API_KEY and OPENROUTER_API_KEY manually."),
+                    );
+                  }}
+                  className="mt-3 inline-flex min-h-11 items-center rounded-lg border border-violet-200 bg-white px-3 py-2 text-xs font-bold text-violet-800 hover:bg-violet-50 touch-manipulation"
+                >
+                  Copy failover .env snippet
+                </button>
+              ) : null}
+              {envCopyMessage ? (
+                <p className="mt-2 text-xs font-medium text-emerald-700">{envCopyMessage}</p>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </section>
 
@@ -515,6 +724,9 @@ export function SettingsPanel() {
             <h3 className="text-xl font-bold text-stone-900">LMS connections</h3>
             <p className="text-sm text-stone-500">
               Connect Blackboard, Canvas, Moodle, or Google Classroom to import syllabi and due dates.
+              These features need your school credentials, a configured connector, and (for some
+              campuses) network access — Study Haul never pretends a school is connected without a
+              successful save or sync.
             </p>
           </div>
         </div>
@@ -620,6 +832,16 @@ export function SettingsPanel() {
             <RefreshCw className={`h-4 w-4 ${syncingMoodle && selectedProvider === "MOODLE" ? "animate-spin" : ""}`} />
             {selectedProvider === "MOODLE" ? "Sync from this device" : "Sync now"}
           </button>
+          {selectedProvider === "CANVAS" ? (
+            <button
+              type="button"
+              onClick={() => void testCanvasConnection()}
+              disabled={testingCanvas}
+              className="rounded-xl border border-violet-200 px-5 py-2.5 text-sm font-semibold text-violet-700 disabled:opacity-60"
+            >
+              {testingCanvas ? "Testing…" : "Test Canvas"}
+            </button>
+          ) : null}
           {selectedProvider === "MOODLE" ? (
             <button
               type="button"
@@ -655,6 +877,33 @@ export function SettingsPanel() {
           </p>
         ) : null}
 
+        {lmsColdStartCourses.length > 0 ? (
+          <div className="mt-4 space-y-2">
+            <p className="text-xs font-bold uppercase tracking-wider text-violet-700">
+              Synced courses
+            </p>
+            {lmsColdStartCourses.map((course) => (
+              <div
+                key={course.id}
+                className="rounded-2xl border border-violet-200 bg-white/80 px-3 py-3"
+              >
+                <span className="text-xs font-semibold text-stone-700">{course.title}</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {connections.length === 0 ? (
+          <p
+            className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950"
+            data-lms-environment-notice
+          >
+            No LMS connection saved yet. Import and sync stay unavailable until you save a
+            provider URL/token (or complete OAuth) and the external service accepts the request.
+            Demo import is for exploration only — it is not a live school connection.
+          </p>
+        ) : null}
+
         {connections.length > 0 ? (
           <div className="mt-6 space-y-2">
             {connections.map((connection) => (
@@ -670,7 +919,12 @@ export function SettingsPanel() {
                       Last synced{" "}
                       {new Date(connection.lastSyncedAt).toLocaleString()}
                     </p>
-                  ) : null}
+                  ) : (
+                    <p className="text-xs text-amber-700">
+                      Saved, but not synced yet — sync may need campus network or valid
+                      permissions.
+                    </p>
+                  )}
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700">
@@ -708,7 +962,13 @@ function ColorField({
     <div className="space-y-2 text-sm">
       <span className="font-semibold text-stone-700">{label}</span>
       <div className="flex items-center gap-3">
-        <ColorPicker compact value={value || fallback} onChange={onChange} label={label} />
+        <ColorPicker
+          compact
+          recordRecent
+          value={value || fallback}
+          onChange={onChange}
+          label={label}
+        />
         <code className="text-xs text-stone-500">{value || fallback}</code>
       </div>
     </div>

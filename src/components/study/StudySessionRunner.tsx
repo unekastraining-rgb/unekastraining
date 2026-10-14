@@ -13,6 +13,21 @@ import {
 } from "lucide-react";
 
 import type { StudyBlock, StudyMinutes } from "@/lib/csl/study-now";
+import type { StudyNowUleBridgePick } from "@/lib/learning/study-now-ule-bridge";
+import {
+  isSixGuideComponent,
+  personalizeSixGuide,
+  sixGuideHref,
+} from "@/lib/csl/six-guides";
+import {
+  blurtingHref,
+  luckyQuizHref,
+  sixChunkingHref,
+} from "@/lib/study/loop-hrefs";
+import { coreCourseHref } from "@/lib/study/core-href";
+import { StudyLoopStrip } from "@/components/study/StudyLoopStrip";
+import { ContinueLearningButton } from "@/components/study/ContinueLearningButton";
+import { useTapHandler } from "@/hooks/useTapHandler";
 
 export const STUDY_NOW_STORAGE_KEY = "study-now-session";
 export const LUCKY_STORAGE_KEY = "lucky-session";
@@ -23,6 +38,11 @@ export interface StoredStudySession {
   blocks: StudyBlock[];
   context?: Record<string, number>;
   activityType?: string;
+  courseId?: string | null;
+  courseTitle?: string | null;
+  coldStartTopic?: string | null;
+  /** Additive ULE bridge — optional Adaptive CTAs when concept linked. */
+  uleFocusTopics?: StudyNowUleBridgePick[];
 }
 
 export interface SessionRunnerConfig {
@@ -34,6 +54,7 @@ export interface SessionRunnerConfig {
   activityType?: string;
   loadFromApi?: { url: string; method?: "GET" | "POST"; body?: unknown };
   initialMinutes?: StudyMinutes;
+  courseId?: string | null;
 }
 
 const ACCENT = {
@@ -91,6 +112,7 @@ export function StudySessionRunner({
     activityType = "GENERAL",
     loadFromApi,
     initialMinutes,
+    courseId: configCourseId,
   } = config;
   const colors = ACCENT[accent];
 
@@ -120,7 +142,19 @@ export function StudySessionRunner({
       }
 
       if (loadFromApi) {
-        const response = await fetch(loadFromApi.url, {
+        let apiUrl = loadFromApi.url;
+        if (
+          configCourseId &&
+          (loadFromApi.method ?? "GET") === "GET" &&
+          typeof window !== "undefined"
+        ) {
+          const resolved = new URL(apiUrl, window.location.origin);
+          if (!resolved.searchParams.has("courseId")) {
+            resolved.searchParams.set("courseId", configCourseId);
+            apiUrl = `${resolved.pathname}${resolved.search}`;
+          }
+        }
+        const response = await fetch(apiUrl, {
           method: loadFromApi.method ?? "GET",
           headers:
             loadFromApi.method === "POST"
@@ -138,6 +172,10 @@ export function StudySessionRunner({
             totalMinutes: data.data.totalMinutes,
             blocks: data.data.blocks,
             context: data.data.context,
+            courseId: data.data.courseId ?? configCourseId ?? null,
+            courseTitle: data.data.courseTitle ?? null,
+            coldStartTopic: data.data.coldStartTopic ?? null,
+            uleFocusTopics: data.data.uleFocusTopics ?? [],
           };
           sessionStorage.setItem(storageKey, JSON.stringify(stored));
           setSession(stored);
@@ -147,7 +185,10 @@ export function StudySessionRunner({
         const response = await fetch("/api/study-now", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ minutes: initialMinutes }),
+          body: JSON.stringify({
+            minutes: initialMinutes,
+            ...(configCourseId ? { courseId: configCourseId } : {}),
+          }),
         });
         const data = await response.json();
         if (data.success) {
@@ -156,6 +197,10 @@ export function StudySessionRunner({
             totalMinutes: data.data.totalMinutes,
             blocks: data.data.blocks,
             context: data.data.context,
+            courseId: data.data.courseId ?? configCourseId ?? null,
+            courseTitle: data.data.courseTitle ?? null,
+            coldStartTopic: data.data.coldStartTopic ?? null,
+            uleFocusTopics: data.data.uleFocusTopics ?? [],
           };
           sessionStorage.setItem(storageKey, JSON.stringify(stored));
           setSession(stored);
@@ -165,7 +210,7 @@ export function StudySessionRunner({
       setLoading(false);
     }
     void load();
-  }, [storageKey, loadFromApi, initialMinutes]);
+  }, [storageKey, loadFromApi, initialMinutes, configCourseId]);
 
   const currentBlock = session?.blocks[blockIndex];
   const progress = useMemo(() => {
@@ -223,6 +268,10 @@ export function StudySessionRunner({
     [session, currentBlock, blockIndex, storageKey, activityType, sessionStart, completedIds.size],
   );
 
+  const tapToggleRunning = useTapHandler(() => setRunning((prev) => !prev));
+  const tapCompleteBlock = useTapHandler(() => advance("complete"));
+  const tapSkipBlock = useTapHandler(() => advance("skip"));
+
   if (loading) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center text-stone-500">
@@ -248,6 +297,12 @@ export function StudySessionRunner({
   if (finished) {
     const completed = completedIds.size;
     const skipped = skippedIds.size;
+    const courseId = session?.courseId?.trim() || null;
+    const topicName =
+      session?.coldStartTopic?.trim() ||
+      session?.blocks.find((block) => block.topicName)?.topicName ||
+      session?.courseTitle ||
+      null;
     return (
       <div className="mx-auto max-w-lg space-y-6 px-4 py-12 text-center">
         <CheckCircle2 className="mx-auto h-14 w-14 text-emerald-500" />
@@ -256,16 +311,69 @@ export function StudySessionRunner({
           {completed} block{completed === 1 ? "" : "s"} completed
           {skipped > 0 ? ` · ${skipped} skipped` : ""}.
         </p>
+        {courseId ? (
+          <>
+            <StudyLoopStrip
+              courseId={courseId}
+              courseTitle={session?.courseTitle ?? "this class"}
+              topics={
+                session?.coldStartTopic
+                  ? [session.coldStartTopic]
+                  : session?.blocks
+                      .map((block) => block.topicName)
+                      .filter((name): name is string => Boolean(name?.trim()))
+              }
+              focusTopic={topicName}
+            />
+            <div
+              data-hub-chrome
+              className="rounded-2xl border border-brand bg-brand-soft/30 p-4 text-left"
+            >
+            <p className="text-xs font-bold uppercase tracking-wider text-brand">
+              Keep the loop going
+            </p>
+            <p className="mt-1 text-sm text-stone-600">
+              Core notes → Six → Lucky for {session?.courseTitle ?? "this class"}.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Link
+                href={coreCourseHref({ courseId })}
+                className="inline-flex min-h-11 items-center rounded-full border border-brand bg-white px-3 py-1.5 text-xs font-semibold text-stone-700 hover:bg-brand-soft touch-manipulation"
+              >
+                Core notes
+              </Link>
+              <Link
+                href={sixChunkingHref(courseId, topicName || "notes")}
+                className="inline-flex min-h-11 items-center rounded-full border border-teal-200 bg-teal-50 px-3 py-1.5 text-xs font-semibold text-teal-800 hover:bg-teal-100 touch-manipulation"
+              >
+                Six chunking
+              </Link>
+              <Link
+                href={blurtingHref(courseId, null, topicName ?? undefined)}
+                className="inline-flex min-h-11 items-center rounded-full border border-orange-200 bg-orange-50 px-3 py-1.5 text-xs font-semibold text-orange-800 hover:bg-orange-100 touch-manipulation"
+              >
+                Blurt gaps
+              </Link>
+              <Link
+                href={luckyQuizHref(courseId, null, topicName)}
+                className="inline-flex min-h-11 items-center rounded-full border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-800 hover:bg-violet-100 touch-manipulation"
+              >
+                Lucky quiz
+              </Link>
+            </div>
+            </div>
+          </>
+        ) : null}
         <div className="flex flex-wrap justify-center gap-3">
           <Link
             href={backHref}
-            className={`rounded-xl px-5 py-2.5 text-sm font-semibold text-white ${colors.btn}`}
+            className={`inline-flex min-h-11 items-center rounded-xl px-5 py-2.5 text-sm font-semibold text-white touch-manipulation ${colors.btn}`}
           >
             Back to {backLabel}
           </Link>
           <Link
             href="/dashboard"
-            className={`rounded-xl border px-5 py-2.5 text-sm font-semibold text-stone-700 ${colors.border} hover:bg-stone-50`}
+            className={`inline-flex min-h-11 items-center rounded-xl border px-5 py-2.5 text-sm font-semibold text-stone-700 touch-manipulation ${colors.border} hover:bg-stone-50`}
           >
             Dashboard
           </Link>
@@ -280,6 +388,30 @@ export function StudySessionRunner({
     currentBlock && "phase" in currentBlock
       ? String((currentBlock as StudyBlock & { phase?: string }).phase)
       : null;
+
+  const uleContinue = (session.uleFocusTopics ?? []).filter(
+    (t) => t.conceptId && t.adaptiveCta.kind !== "none",
+  );
+
+  const blockActivity = currentBlock?.activity;
+  const sixGuide =
+    currentBlock &&
+    typeof blockActivity === "string" &&
+    isSixGuideComponent(blockActivity)
+      ? personalizeSixGuide(blockActivity, {
+          topicName: currentBlock.topicName,
+          courseTitle: currentBlock.subtitle?.split("·")[0]?.trim(),
+        })
+      : null;
+
+  const openHref =
+    currentBlock?.href ||
+    (sixGuide
+      ? sixGuideHref(sixGuide.component, {
+          courseId: session?.courseId ?? undefined,
+          topicName: currentBlock?.topicName,
+        })
+      : undefined);
 
   return (
     <div className="mx-auto max-w-2xl space-y-8 px-4 py-8 pb-[calc(2rem+env(safe-area-inset-bottom))]">
@@ -306,6 +438,47 @@ export function StudySessionRunner({
         <p className="mt-2 text-xs text-stone-500">{session.summary}</p>
       </div>
 
+      {uleContinue.length > 0 ? (
+        <div
+          data-study-now-ule-bridge
+          className="rounded-2xl border border-teal-200 bg-teal-50/50 p-4"
+        >
+          <p className="text-xs font-bold uppercase tracking-wider text-teal-800">
+            Adaptive practice
+          </p>
+          <p className="mt-1 text-sm text-stone-600">
+            Optional Start / Continue learning for topics already linked to a concept —
+            does not replace this Study Now plan.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-3">
+            {uleContinue.map((topic) => (
+              <ContinueLearningButton
+                key={topic.topicId}
+                conceptId={topic.conceptId!}
+                secondaryHint={topic.topicName}
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {session.courseId ? (
+        <StudyLoopStrip
+          courseId={session.courseId}
+          courseTitle={session.courseTitle ?? "this course"}
+          topics={
+            session.blocks
+              .map((block) => block.topicName)
+              .filter((name): name is string => Boolean(name?.trim()))
+          }
+          focusTopic={
+            session.coldStartTopic?.trim() ||
+            session.blocks.find((block) => block.topicName)?.topicName ||
+            null
+          }
+        />
+      ) : null}
+
       <div
         className={`rounded-3xl border bg-gradient-to-br to-white p-8 text-center shadow-sm ${colors.card}`}
       >
@@ -313,6 +486,9 @@ export function StudySessionRunner({
           {phaseLabel}
         </p>
         <h1 className="mt-2 text-2xl font-black text-stone-900">{currentBlock?.label}</h1>
+        {currentBlock?.subtitle ? (
+          <p className="mt-1 text-sm text-stone-600">{currentBlock.subtitle}</p>
+        ) : null}
         <p className="mt-1 text-sm text-stone-500">{currentBlock?.minutes} min suggested</p>
 
         <div className="relative mx-auto mt-8 flex h-36 w-36 items-center justify-center">
@@ -336,35 +512,74 @@ export function StudySessionRunner({
 
         <button
           type="button"
-          onClick={() => setRunning((prev) => !prev)}
-          className={`mt-4 inline-flex items-center gap-2 rounded-full border bg-white px-4 py-2 text-sm font-semibold text-stone-700 ${colors.border} hover:opacity-90`}
+          {...tapToggleRunning}
+          className={`mt-4 inline-flex min-h-11 items-center gap-2 rounded-full border bg-white px-4 py-2 text-sm font-semibold text-stone-700 touch-manipulation ${colors.border} hover:opacity-90`}
         >
           {running ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
           {running ? "Pause" : "Resume"}
         </button>
       </div>
 
+      {sixGuide ? (
+        <div className="space-y-4 rounded-2xl border border-teal-200 bg-teal-50/40 p-5 text-left">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wider text-teal-700">
+              Technique · {sixGuide.title}
+            </p>
+            <p className="mt-1 text-sm text-stone-800">{sixGuide.whatItMeans}</p>
+          </div>
+
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wider text-stone-500">
+              Do this now
+            </p>
+            <ol className="mt-2 list-decimal space-y-1.5 pl-5 text-sm text-stone-800">
+              {sixGuide.howTo.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ol>
+          </div>
+
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wider text-stone-500">
+              Examples
+            </p>
+            <ul className="mt-2 space-y-2 text-sm text-stone-700">
+              {sixGuide.examples.map((item) => (
+                <li
+                  key={item}
+                  className="rounded-xl border border-teal-100 bg-white/80 px-3 py-2"
+                >
+                  {item}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      ) : null}
+
       <div className="flex flex-col gap-3 sm:flex-row sm:justify-center">
-        {currentBlock?.href ? (
+        {openHref ? (
           <Link
-            href={currentBlock.href}
-            target="_blank"
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-teal-200 bg-teal-50 px-5 py-3 text-sm font-semibold text-teal-800 hover:bg-teal-100"
+            href={openHref}
+            data-hub-chrome
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-teal-200 bg-teal-50 px-5 py-3 text-sm font-semibold text-teal-800 hover:bg-teal-100 touch-manipulation"
           >
-            Open activity <ExternalLink className="h-4 w-4" />
+            {sixGuide ? "Open guided steps" : "Open activity"}{" "}
+            <ExternalLink className="h-4 w-4" />
           </Link>
         ) : null}
         <button
           type="button"
-          onClick={() => advance("complete")}
-          className={`inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold text-white ${colors.btn}`}
+          {...tapCompleteBlock}
+          className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold text-white touch-manipulation ${colors.btn}`}
         >
           <CheckCircle2 className="h-4 w-4" /> Complete block
         </button>
         <button
           type="button"
-          onClick={() => advance("skip")}
-          className={`inline-flex items-center justify-center gap-2 rounded-xl border px-5 py-3 text-sm font-semibold text-stone-600 ${colors.border} hover:bg-stone-50`}
+          {...tapSkipBlock}
+          className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border px-5 py-3 text-sm font-semibold text-stone-600 touch-manipulation ${colors.border} hover:bg-stone-50`}
         >
           <SkipForward className="h-4 w-4" /> Skip
         </button>

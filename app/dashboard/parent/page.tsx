@@ -6,16 +6,19 @@ import { HubBackBar } from "@/components/hub/HubBackBar";
 import { ParentDashboard } from "@/components/grade-school/ParentDashboard";
 import type { HubGradeSchoolPlan } from "@/components/hub/types";
 import { progressByCourse } from "@/lib/grade-school/progress";
+import { readableCourseName } from "@/lib/courses/display-name";
 import { parseCurriculumFromMaterial } from "@/lib/grade-school/learning-plan";
 import { getGradeSchoolProgress } from "@/lib/grade-school/progress";
 import { getOrCreateUserPreferences } from "@/lib/preferences";
 import { db } from "@/lib/db";
+import { backfillUserCourseTopicsIfEmpty } from "@/lib/syllabus/enrich-course-from-syllabus";
 import { getOrCreateDefaultUser } from "@/lib/user";
 
 export const dynamic = "force-dynamic";
 
 export default async function ParentDashboardPage() {
   const user = await getOrCreateDefaultUser();
+  await backfillUserCourseTopicsIfEmpty(user.id);
   const preferences = await getOrCreateUserPreferences(user.id);
 
   if (!preferences.elementaryMode) {
@@ -35,7 +38,8 @@ export default async function ParentDashboardPage() {
     );
   }
 
-  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const weekAgo = new Date();
+  weekAgo.setUTCDate(weekAgo.getUTCDate() - 7);
 
   const [courses, progressRows, weekSessions] = await Promise.all([
     db.course.findMany({
@@ -71,7 +75,7 @@ export default async function ParentDashboardPage() {
       if (!curriculum?.learningSteps?.length) return null;
       return {
         courseId: course.id,
-        courseTitle: course.title,
+        courseTitle: readableCourseName(course),
         courseColor: course.color,
         curriculum,
       };

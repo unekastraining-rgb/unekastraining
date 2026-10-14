@@ -54,6 +54,7 @@ export function ResourceFormModal({
   useEffect(() => {
     if (!open) return;
     if (initial) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync UI state to props or external subscription
       setForm({
         title: initial.title,
         url: initial.url,
@@ -114,7 +115,7 @@ export function ResourceFormModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40 p-4">
+    <div className="fixed inset-0 z-[600] flex items-center justify-center bg-stone-900/40 p-4">
       <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-3xl border border-brand bg-white p-6 shadow-xl">
         <div className="flex items-start justify-between gap-3">
           <div>

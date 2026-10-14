@@ -143,32 +143,45 @@ export async function DELETE(request: Request) {
   try {
     const user = await getOrCreateDefaultUser();
     const body = await request.json();
-    const { id } = body;
+    const rawIds = Array.isArray(body.ids)
+      ? body.ids
+      : body.id
+        ? [body.id]
+        : [];
+    const ids = rawIds
+      .map((value: unknown) => (typeof value === "string" ? value.trim() : ""))
+      .filter(Boolean);
 
-    if (!id) {
+    if (ids.length === 0) {
       return NextResponse.json(
         { success: false, error: "Meeting id is required." },
         { status: 400 },
       );
     }
 
-    const meeting = await db.classMeeting.findFirst({
+    const owned = await db.classMeeting.findMany({
       where: {
-        id,
+        id: { in: ids },
         course: { userId: user.id },
       },
+      select: { id: true },
     });
-
-    if (!meeting) {
+    const ownedIds = owned.map((m) => m.id);
+    if (ownedIds.length === 0) {
       return NextResponse.json(
         { success: false, error: "Class meeting not found." },
         { status: 404 },
       );
     }
 
-    await db.classMeeting.delete({ where: { id } });
+    await db.classMeeting.deleteMany({
+      where: { id: { in: ownedIds } },
+    });
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({
+      success: true,
+      data: { deleted: ownedIds.length },
+    });
   } catch (error) {
     console.error("Failed to delete class meeting:", error);
     return NextResponse.json(

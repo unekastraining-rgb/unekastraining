@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { MapPin } from "lucide-react";
 
 import { useCalendarAppearance } from "@/components/calendar/CalendarAppearanceContext";
@@ -39,21 +41,72 @@ export function CourseEventBlock({
   const start = new Date(item.startAt);
   const end = item.endAt ? new Date(item.endAt) : null;
   const canComplete = item.editable && item.source !== "meeting";
+  const allDay = Boolean(item.allDay);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [hover, setHover] = useState(false);
+  const [tipPos, setTipPos] = useState<{ top: number; left: number } | null>(
+    null,
+  );
 
-  const timeLabel = item.allDay
+  const timeLabel = allDay
     ? "All day"
     : end
       ? `${formatTimeLabel(start)} – ${formatTimeLabel(end)}`
       : formatTimeLabel(start);
 
+  const hoverLines = [
+    item.title,
+    timeLabel,
+    item.courseTitle ? `Class: ${item.courseTitle}` : null,
+    item.location ? `Location: ${item.location}` : null,
+    EVENT_TYPE_LABELS[item.eventType]
+      ? `Type: ${EVENT_TYPE_LABELS[item.eventType]}`
+      : null,
+    item.description?.trim() ? item.description.trim().slice(0, 160) : null,
+    item.completed ? "Completed" : null,
+  ].filter(Boolean) as string[];
+
+  useEffect(() => {
+    if (!hover) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync UI state to props or external subscription
+      setTipPos(null);
+      return;
+    }
+    function place() {
+      const rect = rootRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const tipW = 224;
+      const tipH = 140;
+      const left = Math.min(
+        Math.max(8, rect.left),
+        Math.max(8, window.innerWidth - tipW - 8),
+      );
+      const preferAbove = rect.top > tipH + 16;
+      const top = preferAbove
+        ? Math.max(8, rect.top - tipH - 8)
+        : Math.min(window.innerHeight - tipH - 8, rect.bottom + 8);
+      setTipPos({ top, left });
+    }
+    place();
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [hover]);
+
   return (
     <div
-      className={`flex h-full w-full items-start gap-1 ${
-        selected ? "z-20" : ""
-      } ${dimmed ? "scale-[0.98] opacity-25 saturate-50" : ""} ${
+      ref={rootRef}
+      className={`group/event relative flex w-full items-start gap-1 ${
+        compact ? "h-auto" : "h-full"
+      } ${selected ? "z-20" : ""} ${dimmed ? "scale-[0.98] opacity-25 saturate-50" : ""} ${
         highlighted ? "z-10 scale-[1.02]" : ""
       }`}
-      style={style}
+      style={compact ? undefined : style}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
     >
       {canComplete && onToggleComplete ? (
         <input
@@ -75,7 +128,11 @@ export function CourseEventBlock({
         draggable={draggable ?? (item.editable && item.source !== "meeting")}
         onDragStart={onDragStart}
         onPointerDown={onPointerDragStart}
-        onClick={onClick}
+        onClick={(event) => {
+          event.stopPropagation();
+          onClick?.();
+        }}
+        title={hoverLines.join("\n")}
         className={`min-w-0 flex-1 overflow-hidden rounded-xl px-2 py-1.5 text-left shadow-sm transition-all duration-200 ease-in-out hover:shadow-md ${
           item.editable && item.source !== "meeting"
             ? "cursor-grab active:cursor-grabbing"
@@ -86,12 +143,14 @@ export function CourseEventBlock({
             item.color,
             compact ? appearance.eventFillOpacity * 0.9 : appearance.eventFillOpacity,
           ),
+          outline: allDay ? "2px solid #0c0a09" : undefined,
+          outlineOffset: allDay ? "-1px" : undefined,
           boxShadow: highlighted
             ? `0 6px 18px ${colorWithAlpha(item.color, 0.35)}`
             : selected
               ? `0 0 0 2px ${appearance.accentColor}`
               : undefined,
-          ...style,
+          ...(compact ? undefined : style),
         }}
       >
         <p
@@ -121,37 +180,43 @@ export function CourseEventBlock({
                 {item.courseTitle}
               </p>
             ) : null}
-            {item.location ? (
-              <p
-                className="mt-0.5 flex items-center gap-0.5 truncate text-[9px] opacity-75"
-                style={{ color: appearance.mutedTextColor }}
-              >
-                <MapPin className="h-2.5 w-2.5 shrink-0" />
-                {item.location}
-              </p>
-            ) : null}
           </>
-        ) : (
-          <p
-            className={`truncate text-[9px] ${item.completed ? "line-through opacity-50" : ""}`}
-            style={{ color: appearance.mutedTextColor }}
-          >
-            {timeLabel}
-          </p>
-        )}
-
-        {!compact && !item.allDay ? (
-          <span
-            className="mt-1 w-fit rounded-full px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider"
-            style={{
-              backgroundColor: colorWithAlpha(item.color, 0.45),
-              color: appearance.textColor,
-            }}
-          >
-            {EVENT_TYPE_LABELS[item.eventType]}
-          </span>
         ) : null}
       </button>
+
+      {hover && tipPos && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              role="tooltip"
+              className="pointer-events-none fixed z-[700] w-56 rounded-xl border border-stone-800/20 bg-stone-900 px-3 py-2 text-left shadow-xl"
+              style={{ top: tipPos.top, left: tipPos.left }}
+            >
+              <p className="text-xs font-bold text-white">{item.title}</p>
+              <p className="mt-0.5 text-[11px] font-semibold text-stone-300">
+                {timeLabel}
+              </p>
+              {item.courseTitle ? (
+                <p className="mt-1 text-[10px] text-stone-400">{item.courseTitle}</p>
+              ) : null}
+              {item.location ? (
+                <p className="mt-0.5 flex items-center gap-1 text-[10px] text-stone-400">
+                  <MapPin className="h-3 w-3 shrink-0" />
+                  {item.location}
+                </p>
+              ) : null}
+              <p className="mt-1 text-[10px] uppercase tracking-wide text-stone-500">
+                {EVENT_TYPE_LABELS[item.eventType]}
+                {allDay ? " · All day" : ""}
+              </p>
+              {item.description?.trim() ? (
+                <p className="mt-1 line-clamp-3 text-[10px] leading-snug text-stone-400">
+                  {item.description.trim()}
+                </p>
+              ) : null}
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }

@@ -4,12 +4,15 @@ import { aiService } from "@/lib/ai";
 import { isAIConfigured } from "@/lib/ai/is-configured";
 import { loadAllCoursesSourceText, loadCourseSourceText } from "@/lib/ai/course-source";
 import { buildOfflineChatReply } from "@/lib/chat/offline-reply";
+import { readableCourseCode, readableCourseName, readableCourseTitle } from "@/lib/courses/display-name";
 import { db } from "@/lib/db";
 import {
   aiSourceInstruction,
   getUserAppSettings,
 } from "@/lib/settings/app-settings";
 import { portalToContextText } from "@/lib/lms/course-info/portal-context";
+import { tutorPersonalizationBlock } from "@/lib/learning/habits/engine";
+import { loadLearningHabits } from "@/lib/learning/habits/persistence";
 import { getOrCreateDefaultUser } from "@/lib/user";
 
 export async function POST(request: Request) {
@@ -72,7 +75,7 @@ export async function POST(request: Request) {
           where: {
             course: courseWhere,
           },
-          select: { name: true, description: true, course: { select: { title: true } } },
+          select: { name: true, description: true, course: { select: { title: true, code: true } } },
           take: 12,
         }),
         db.assignment.findMany({
@@ -80,7 +83,7 @@ export async function POST(request: Request) {
             course: courseWhere,
             dueDate: { gte: new Date() },
           },
-          include: { course: { select: { title: true } } },
+          include: { course: { select: { title: true, code: true } } },
           orderBy: { dueDate: "asc" },
           take: 5,
         }),
@@ -88,7 +91,7 @@ export async function POST(request: Request) {
         courseId
           ? db.course.findFirst({
               where: { id: courseId, userId: user.id },
-              select: { title: true, courseInfoJson: true },
+              select: { title: true, code: true, courseInfoJson: true },
             })
           : Promise.resolve(null),
       ]);
@@ -109,7 +112,7 @@ export async function POST(request: Request) {
     const courseContext = courses
       .map((course) => {
         const parts = [
-          course.title,
+          readableCourseName(course),
           course.gradeLevel ? `grade ${course.gradeLevel}` : null,
           course.subject ? `subject ${course.subject}` : null,
           course.focusTopic ? `focus ${course.focusTopic}` : null,
@@ -121,7 +124,7 @@ export async function POST(request: Request) {
       .join("; ");
 
     const topicContext = topics
-      .map((topic) => `${topic.name} (${topic.course.title}): ${topic.description ?? ""}`)
+      .map((topic) => `${topic.name} (${readableCourseTitle(topic.course.title, topic.course.code)}): ${topic.description ?? ""}`)
       .join("; ");
 
     let portalContext = "";
@@ -131,7 +134,7 @@ export async function POST(request: Request) {
 
     const context = [
       focusedCourse
-        ? `Focused class: ${focusedCourse.title} — prioritize this course in your answer.`
+        ? `Focused class: ${readableCourseTitle(focusedCourse.title, focusedCourse.code)} — prioritize this course in your answer.`
         : null,
       portalContext
         ? `Imported course syllabus portal (use only this data — do not invent missing facts):\n${portalContext}`
@@ -142,7 +145,7 @@ export async function POST(request: Request) {
         upcomingAssignments
           .map(
             (assignment) =>
-              `${assignment.title} (${assignment.course.title}) due ${assignment.dueDate?.toLocaleDateString() ?? "TBD"}`,
+              `${assignment.title} (${readableCourseTitle(assignment.course.title, assignment.course.code)}) due ${assignment.dueDate?.toLocaleDateString() ?? "TBD"}`,
           )
           .join("; ") || "none"
       }`,
@@ -154,6 +157,14 @@ export async function POST(request: Request) {
       .filter(Boolean)
       .join("\n");
 
+    let habitsContext = "";
+    try {
+      const habits = await loadLearningHabits(user.id);
+      habitsContext = tutorPersonalizationBlock(habits.doc);
+    } catch {
+      habitsContext = "";
+    }
+
     const systemPrompt = isElementary
       ? "You are Study Haul Chat, a warm and encouraging tutor for younger students. Use simple words, short sentences, and positive encouragement. Help explain school topics at the student's grade level. Use the course and topic context when relevant. Never be condescending."
       : "You are Study Haul Chat, a friendly academic copilot. Be concise, energetic, and practical. Help with schedules, study plans, and assignment strategy. Use the student context when relevant.";
@@ -161,14 +172,14 @@ export async function POST(request: Request) {
     if (!isAIConfigured()) {
       const reply = buildOfflineChatReply(message, {
         courses: courses.map((course) => ({
-          title: course.title,
-          code: course.code,
+          title: readableCourseName(course),
+          code: readableCourseCode(course),
           semester: course.semester,
         })),
         upcomingAssignments: upcomingAssignments.map((assignment) => ({
           title: assignment.title,
           dueDate: assignment.dueDate,
-          courseTitle: assignment.course.title,
+          courseTitle: readableCourseTitle(assignment.course.title, assignment.course.code),
         })),
         materialExcerpt: materialContext || undefined,
       });
@@ -176,23 +187,29 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: true, reply, offline: true });
     }
 
-    const result = await aiService.complete([
-      {
-        role: "system",
-        content: systemPrompt,
-      },
-      {
-        role: "system",
-        content: context,
-      },
-      ...history
-        .filter((item) => item.role === "user" || item.role === "assistant")
-        .map((item) => ({
-          role: item.role,
-          content: item.content,
-        })),
-      { role: "user", content: message },
-    ]);
+    const result = await aiService.complete(
+      [
+        {
+          role: "system",
+          content: systemPrompt,
+        },
+        {
+          role: "system",
+          content: context,
+        },
+        ...(habitsContext
+          ? [{ role: "system" as const, content: habitsContext }]
+          : []),
+        ...history
+          .filter((item) => item.role === "user" || item.role === "assistant")
+          .map((item) => ({
+            role: item.role,
+            content: item.content,
+          })),
+        { role: "user", content: message },
+      ],
+      { includeOpenAIPro: appSettings.aiUseOpenAIPro },
+    );
 
     return NextResponse.json({ success: true, reply: result.content });
   } catch (error) {

@@ -1,5 +1,6 @@
 import { AssignmentStatus } from "@/generated/prisma";
 import { db } from "@/lib/db";
+import { readableCourseTitle } from "@/lib/courses/display-name";
 import { buildSixHrefForTopic } from "@/lib/csl/six-recommendations";
 import { hubAssignmentFocusHref, hubCalendarHref } from "@/lib/hub/tabs";
 import type { NotificationPrefs } from "@/lib/notifications-prefs";
@@ -21,6 +22,8 @@ export interface AppNotification {
   severity: "high" | "medium" | "low";
   at?: string;
   read?: boolean;
+  loopCourseId?: string | null;
+  loopTopic?: string | null;
 }
 
 export async function buildNotifications(
@@ -39,7 +42,7 @@ export async function buildNotifications(
           in: [AssignmentStatus.NOT_STARTED, AssignmentStatus.IN_PROGRESS],
         },
       },
-      include: { course: { select: { title: true } } },
+      include: { course: { select: { title: true, code: true } } },
       orderBy: { dueDate: "asc" },
       take: 5,
     }),
@@ -51,7 +54,7 @@ export async function buildNotifications(
           in: [AssignmentStatus.NOT_STARTED, AssignmentStatus.IN_PROGRESS],
         },
       },
-      include: { course: { select: { title: true } } },
+      include: { course: { select: { title: true, code: true } } },
       orderBy: { dueDate: "asc" },
       take: 5,
     }),
@@ -74,7 +77,7 @@ export async function buildNotifications(
       where: { userId, proficiency: { lt: 0.55 } },
       include: {
         topic: {
-          include: { course: { select: { id: true, title: true } } },
+          include: { course: { select: { id: true, title: true, code: true } } },
         },
       },
       orderBy: { proficiency: "asc" },
@@ -83,16 +86,20 @@ export async function buildNotifications(
   ]);
 
   const items: AppNotification[] = [];
+  const primaryCourseId = weakTopics[0]?.topic.courseId ?? null;
+  const primaryTopic = weakTopics[0]?.topic.name ?? null;
 
   for (const assignment of overdue) {
     items.push({
       id: `overdue-${assignment.id}`,
       kind: "overdue",
       title: assignment.title,
-      description: `${assignment.course.title} — overdue`,
+      description: `${readableCourseTitle(assignment.course.title, assignment.course.code)} — overdue`,
       href: hubAssignmentFocusHref(assignment.id),
       severity: "high",
       at: assignment.dueDate?.toISOString(),
+      loopCourseId: assignment.courseId,
+      loopTopic: assignment.title.trim() || null,
     });
   }
 
@@ -101,10 +108,12 @@ export async function buildNotifications(
       id: `due-${assignment.id}`,
       kind: "deadline",
       title: assignment.title,
-      description: `${assignment.course.title} — due soon`,
+      description: `${readableCourseTitle(assignment.course.title, assignment.course.code)} — due soon`,
       href: hubAssignmentFocusHref(assignment.id),
       severity: "medium",
       at: assignment.dueDate?.toISOString(),
+      loopCourseId: assignment.courseId,
+      loopTopic: assignment.title.trim() || null,
     });
   }
 
@@ -116,6 +125,8 @@ export async function buildNotifications(
       description: "Spaced review keeps retention strong.",
       href: "/flashcards",
       severity: dueFlashcards >= 15 ? "medium" : "low",
+      loopCourseId: primaryCourseId,
+      loopTopic: primaryTopic,
     });
   }
 
@@ -129,6 +140,8 @@ export async function buildNotifications(
       href: hubCalendarHref({ date: dateParam, focus: event.id }),
       severity: "medium",
       at: event.reminderAt?.toISOString(),
+      loopCourseId: event.courseId,
+      loopTopic: event.title.trim() || null,
     });
   }
 
@@ -137,7 +150,7 @@ export async function buildNotifications(
       id: `weak-${mastery.topicId}`,
       kind: "mastery",
       title: mastery.topic.name,
-      description: `${mastery.topic.course.title} — ${Math.round(mastery.proficiency * 100)}% mastery`,
+      description: `${readableCourseTitle(mastery.topic.course.title, mastery.topic.course.code)} — ${Math.round(mastery.proficiency * 100)}% mastery`,
       href: buildSixHrefForTopic({
         topicId: mastery.topicId,
         topicName: mastery.topic.name,
@@ -149,6 +162,8 @@ export async function buildNotifications(
         reviewCount: mastery.reviewCount,
       }),
       severity: mastery.proficiency < 0.35 ? "high" : "medium",
+      loopCourseId: mastery.topic.courseId,
+      loopTopic: mastery.topic.name,
     });
   }
 

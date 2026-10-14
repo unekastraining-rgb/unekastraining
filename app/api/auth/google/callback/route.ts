@@ -7,6 +7,7 @@ import {
 import { decodeOAuthState, setSessionCookie } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { getAppOrigin } from "@/lib/lms/oauth";
+import { isStoredAvatarUrl } from "@/lib/user/avatar-storage";
 
 export async function GET(request: Request) {
   const origin = getAppOrigin();
@@ -36,11 +37,18 @@ export async function GET(request: Request) {
     const profile = await fetchGoogleUserProfile(tokens.access_token);
     const email = profile.email.trim().toLowerCase();
 
+    const existing = await db.user.findUnique({ where: { email } });
+    const keepCustomPhoto =
+      Boolean(existing?.avatarData) || isStoredAvatarUrl(existing?.avatarUrl);
+
     const user = await db.user.upsert({
       where: { email },
       update: {
         ...(profile.name ? { name: profile.name } : {}),
-        ...(profile.picture ? { avatarUrl: profile.picture } : {}),
+        // Keep Study Haul uploads; only fill Google photo when none is stored.
+        ...(!keepCustomPhoto && profile.picture
+          ? { avatarUrl: profile.picture }
+          : {}),
       },
       create: {
         email,

@@ -1,4 +1,5 @@
 import { HubBackBar } from "@/components/hub/HubBackBar";
+import { HubSubpageShell } from "@/components/hub/HubSubpageShell";
 import { CalendarWorkspace } from "@/components/calendar/CalendarWorkspace";
 import {
   parseCalendarDateParam,
@@ -7,6 +8,7 @@ import {
 import { localDateKey } from "@/lib/calendar/types";
 import { coursesToWorkspace } from "@/lib/calendar/unified-items";
 import { db } from "@/lib/db";
+import { backfillUserCourseTopicsIfEmpty } from "@/lib/syllabus/enrich-course-from-syllabus";
 import { getOrCreateDefaultUser } from "@/lib/user";
 import { CustomizationProvider } from "@/components/customization/CustomizationProvider";
 
@@ -18,6 +20,7 @@ export default async function CalendarPage({
   searchParams: Promise<{ date?: string; view?: string }>;
 }) {
   const user = await getOrCreateDefaultUser();
+  await backfillUserCourseTopicsIfEmpty(user.id);
   const params = await searchParams;
   const initialDate = parseCalendarDateParam(params.date);
   const initialView = parseCalendarViewParam(params.view);
@@ -30,12 +33,14 @@ export default async function CalendarPage({
 
   return (
     <CustomizationProvider>
-      <HubBackBar title="Calendar" planningActive="calendar" />
-      <CalendarWorkspace
-        initialCourses={coursesToWorkspace(courses)}
-        initialDate={initialDate ? localDateKey(initialDate) : undefined}
-        initialView={initialView}
-      />
+      <HubSubpageShell lockViewport>
+        <HubBackBar title="Calendar" planningActive="calendar" />
+        <CalendarWorkspace
+          initialCourses={coursesToWorkspace(courses)}
+          initialDate={initialDate ? localDateKey(initialDate) : undefined}
+          initialView={initialView}
+        />
+      </HubSubpageShell>
     </CustomizationProvider>
   );
 }

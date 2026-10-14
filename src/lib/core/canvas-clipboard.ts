@@ -24,6 +24,7 @@ export function cloneDecoration(item: PageDecoration, offset = 16): PageDecorati
     x: item.x + offset,
     y: item.y + offset,
     groupId: undefined,
+    locked: false,
   };
 }
 
@@ -34,6 +35,7 @@ export function cloneImage(item: PageImage, offset = 16): PageImage {
     x: item.x + offset,
     y: item.y + offset,
     groupId: undefined,
+    locked: false,
   };
 }
 
@@ -44,6 +46,7 @@ export function cloneTextBox(item: PageTextBox, offset = 16): PageTextBox {
     x: item.x + offset,
     y: item.y + offset,
     groupId: undefined,
+    locked: false,
   };
 }
 
@@ -81,6 +84,50 @@ export function clipboardToDocumentItems(
   return { decorations, images, textBoxes };
 }
 
+/** Move a pasted group so its top-left lands at `target` (e.g. current viewport). */
+export function rebaseClipboardItemsToPoint(
+  items: {
+    decorations: PageDecoration[];
+    images: PageImage[];
+    textBoxes: PageTextBox[];
+  },
+  target: { x: number; y: number },
+): {
+  decorations: PageDecoration[];
+  images: PageImage[];
+  textBoxes: PageTextBox[];
+} {
+  const anchors = [
+    ...items.decorations.map((item) => ({ x: item.x, y: item.y })),
+    ...items.images.map((item) => ({ x: item.x, y: item.y })),
+    ...items.textBoxes.map((item) => ({ x: item.x, y: item.y })),
+  ];
+  if (anchors.length === 0) return items;
+
+  const minX = Math.min(...anchors.map((point) => point.x));
+  const minY = Math.min(...anchors.map((point) => point.y));
+  const dx = target.x - minX;
+  const dy = target.y - minY;
+
+  return {
+    decorations: items.decorations.map((item) => ({
+      ...item,
+      x: item.x + dx,
+      y: item.y + dy,
+    })),
+    images: items.images.map((item) => ({
+      ...item,
+      x: item.x + dx,
+      y: item.y + dy,
+    })),
+    textBoxes: items.textBoxes.map((item) => ({
+      ...item,
+      x: item.x + dx,
+      y: item.y + dy,
+    })),
+  };
+}
+
 export function resolveSelectionItems(
   selectedIds: string[],
   doc: {
@@ -105,6 +152,79 @@ export function resolveSelectionItems(
     if (textBox) items.push({ kind: "textbox", textBox });
   }
   return items;
+}
+
+/** Short topic label from selection text for Six / Blurt deep links. */
+export function selectionStudyTopic(
+  selectedText: string,
+  fallback?: string | null,
+): string {
+  const cleaned = selectedText.replace(/\s+/g, " ").trim();
+  if (cleaned.length >= 12) {
+    return cleaned.slice(0, 80);
+  }
+  return fallback?.trim() || cleaned || "this page";
+}
+
+/** Plain text from selected canvas elements for Selection → Lucky / Six. */
+export function selectionSourceText(
+  selectedIds: string[],
+  doc: {
+    typed?: string;
+    decorations?: PageDecoration[];
+    pageTextBoxes?: PageTextBox[];
+    metadata?: {
+      chapterStudyExtract?: {
+        mustKnow?: string[];
+        definitions?: Array<{ term?: string; definition?: string }>;
+        chapterOverview?: string;
+      };
+    };
+  },
+  options?: { includePackForInk?: boolean },
+): string {
+  const parts: string[] = [];
+  let sawNonTextSelection = false;
+  for (const id of selectedIds) {
+    const textBox = doc.pageTextBoxes?.find((t) => t.id === id);
+    if (textBox) {
+      const text = (textBox.text || textBox.html?.replace(/<[^>]+>/g, " ") || "").trim();
+      if (text) parts.push(text);
+      continue;
+    }
+    const decoration = doc.decorations?.find((d) => d.id === id);
+    if (decoration?.text?.trim()) {
+      parts.push(decoration.text.trim());
+      continue;
+    }
+    // Stroke / unknown id — ink selection without typed element text.
+    sawNonTextSelection = true;
+  }
+  if (parts.length === 0 && doc.typed?.trim()) {
+    // Stroke-only selection: fall back to page typed notes as the study target.
+    parts.push(doc.typed.trim());
+  }
+  const thin = parts.join("\n\n").trim().length < 40;
+  const wantPack =
+    thin || (options?.includePackForInk && sawNonTextSelection);
+  if (wantPack) {
+    // Ink-only / thin page: use the cold-start / chapter pack already on the note.
+    const extract = doc.metadata?.chapterStudyExtract;
+    if (extract) {
+      const fromPack: string[] = [];
+      if (extract.chapterOverview?.trim()) fromPack.push(extract.chapterOverview.trim());
+      for (const bullet of extract.mustKnow ?? []) {
+        if (bullet.trim()) fromPack.push(bullet.trim());
+      }
+      for (const def of extract.definitions ?? []) {
+        if (def.term?.trim() && def.definition?.trim()) {
+          fromPack.push(`${def.term.trim()}: ${def.definition.trim()}`);
+        }
+      }
+      if (fromPack.length > 0) parts.push(...fromPack);
+    }
+  }
+  return parts.join("\n\n").trim();
 }
 
 export function applyGroupId(

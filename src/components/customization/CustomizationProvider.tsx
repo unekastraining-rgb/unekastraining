@@ -47,6 +47,7 @@ export function CustomizationProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async data load on mount or dependency change
     void refresh();
   }, [refresh]);
 

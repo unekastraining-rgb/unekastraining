@@ -2,6 +2,7 @@
 
 import { Group, Ungroup } from "lucide-react";
 
+import { CoreChromeAction } from "@/components/core/CoreChromeAction";
 import { ColorPicker } from "@/components/customization/ColorPicker";
 import { CompactPalettePicker } from "@/components/customization/CompactPalettePicker";
 import type { PageDecoration, PageImage, PageTextBox } from "@/lib/core/note-types";
@@ -44,43 +45,70 @@ export function CanvasElementInspector({
   return (
     <div
       data-canvas-inspector
-      className="absolute left-2 right-2 top-2 z-[30] rounded-2xl border border-orange-200 bg-white/95 p-3 shadow-lg backdrop-blur-sm"
+      className="shrink-0 border-b border-orange-100 bg-stone-50/80 px-3 py-2"
     >
-      <div className="flex flex-wrap items-start gap-3">
-        <p className="w-full text-[10px] font-bold uppercase tracking-wider text-stone-500">
-          {multi ? `${selectedCount} elements selected` : "Selected element"}
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-[10px] font-bold uppercase tracking-wider text-stone-500">
+          {multi
+            ? `${selectedCount} selected`
+            : textBox
+              ? "Text box"
+              : decoration
+                ? "Element"
+                : image
+                  ? "Image"
+                  : "Selection"}
         </p>
 
         {(canGroup || canUngroup) && (
           <div className="flex gap-1">
             {canGroup ? (
-              <button
-                type="button"
-                onClick={onGroup}
+              <CoreChromeAction
+                onActivate={() => onGroup?.()}
                 className="inline-flex items-center gap-1 rounded-lg border border-stone-200 px-2 py-1 text-[10px] font-semibold text-stone-600 hover:bg-stone-50"
                 title="Group (⌘G)"
               >
                 <Group className="h-3 w-3" />
                 Group
-              </button>
+              </CoreChromeAction>
             ) : null}
             {canUngroup ? (
-              <button
-                type="button"
-                onClick={onUngroup}
+              <CoreChromeAction
+                onActivate={() => onUngroup?.()}
                 className="inline-flex items-center gap-1 rounded-lg border border-stone-200 px-2 py-1 text-[10px] font-semibold text-stone-600 hover:bg-stone-50"
                 title="Ungroup (⇧⌘G)"
               >
                 <Ungroup className="h-3 w-3" />
                 Ungroup
-              </button>
+              </CoreChromeAction>
             ) : null}
           </div>
         )}
 
+        {textBox && !multi ? (
+          <>
+            <div className="min-w-[7rem]">
+              <ColorPicker
+                compact
+                label="Default text"
+                value={textColor}
+                onChange={(color) => onTextBoxChange?.({ color })}
+              />
+            </div>
+            <div className="min-w-[7rem]">
+              <ColorPicker
+                compact
+                label="Box fill"
+                value={textBox.backgroundColor ?? "#ffffff"}
+                onChange={(color) => onTextBoxChange?.({ backgroundColor: color })}
+              />
+            </div>
+          </>
+        ) : null}
+
         {decoration && !multi ? (
           <>
-            <div className="min-w-[8rem]">
+            <div className="min-w-[7rem]">
               <ColorPicker
                 compact
                 label="Fill"
@@ -92,16 +120,16 @@ export function CanvasElementInspector({
             decoration.kind === "banner" ||
             decoration.kind === "sticky" ? (
               <>
-                <div className="min-w-[8rem]">
+                <div className="min-w-[7rem]">
                   <ColorPicker
                     compact
-                    label="Border / accent"
+                    label="Border"
                     value={borderColor}
                     onChange={(color) => onDecorationChange?.({ borderColor: color })}
                   />
                 </div>
                 {(decoration.kind === "sticky" || decoration.kind === "text_stamp") && (
-                  <div className="min-w-[8rem]">
+                  <div className="min-w-[7rem]">
                     <ColorPicker
                       compact
                       label="Text"
@@ -114,7 +142,7 @@ export function CanvasElementInspector({
             ) : null}
             {(decoration.kind === "text_stamp" || decoration.kind === "banner") && (
               <label className="flex min-w-[10rem] flex-1 flex-col gap-1">
-                <span className="text-[10px] font-semibold text-stone-500">Label text</span>
+                <span className="text-[10px] font-semibold text-stone-500">Label</span>
                 <input
                   value={decoration.text ?? ""}
                   onChange={(e) => onDecorationChange?.({ text: e.target.value })}
@@ -122,77 +150,50 @@ export function CanvasElementInspector({
                 />
               </label>
             )}
-          </>
-        ) : null}
-
-        {textBox && !multi ? (
-          <>
-            <div className="min-w-[8rem]">
-              <ColorPicker
-                compact
-                label="Text"
-                value={textColor}
-                onChange={(color) => onTextBoxChange?.({ color })}
-              />
-            </div>
-            <div className="min-w-[8rem]">
-              <ColorPicker
-                compact
-                label="Background"
-                value={textBox.backgroundColor ?? "#ffffff"}
-                onChange={(color) => onTextBoxChange?.({ backgroundColor: color })}
+            <div className="min-w-[10rem] flex-1">
+              <CompactPalettePicker
+                applyGlobally={false}
+                label="Palette"
+                showImageImport
+                onSelectPalette={(colors) => {
+                  if (colors[0]) onDecorationChange?.({ color: colors[0] });
+                }}
               />
             </div>
           </>
         ) : null}
 
         {image && !multi ? (
-          <p className="text-[10px] text-stone-500">Imported image — use opacity to fade.</p>
+          <p className="text-[10px] text-stone-500">Imported image — adjust opacity to fade.</p>
         ) : null}
 
         {!multi ? (
-          <div className="min-w-[8rem]">
-            <label className="flex flex-col gap-1">
-              <span className="text-[10px] font-semibold text-stone-500">Opacity</span>
-              <input
-                type="range"
-                min={0.1}
-                max={1}
-                step={0.05}
-                value={opacity}
-                onChange={(e) => {
-                  const next = Number(e.target.value);
-                  if (decoration) onDecorationChange?.({ opacity: next });
-                  if (image) onImageChange?.({ opacity: next });
-                  if (textBox) onTextBoxChange?.({ opacity: next });
-                }}
-                className="w-full"
-              />
-            </label>
-          </div>
-        ) : null}
-
-        {decoration && !multi ? (
-          <div className="min-w-[12rem] flex-1">
-            <CompactPalettePicker
-              applyGlobally={false}
-              label="Palette swatches"
-              showImageImport
-              onSelectPalette={(colors) => {
-                if (colors[0]) onDecorationChange?.({ color: colors[0] });
+          <label className="flex min-w-[7rem] flex-col gap-1">
+            <span className="text-[10px] font-semibold text-stone-500">Opacity</span>
+            <input
+              type="range"
+              min={0.1}
+              max={1}
+              step={0.05}
+              value={opacity}
+              onChange={(e) => {
+                const next = Number(e.target.value);
+                if (decoration) onDecorationChange?.({ opacity: next });
+                if (image) onImageChange?.({ opacity: next });
+                if (textBox) onTextBoxChange?.({ opacity: next });
               }}
+              className="w-full"
             />
-          </div>
+          </label>
         ) : null}
 
         {onClose ? (
-          <button
-            type="button"
-            onClick={onClose}
+          <CoreChromeAction
+            onActivate={onClose}
             className="ml-auto text-[10px] font-semibold text-stone-400 hover:text-stone-600"
           >
             Done
-          </button>
+          </CoreChromeAction>
         ) : null}
       </div>
     </div>

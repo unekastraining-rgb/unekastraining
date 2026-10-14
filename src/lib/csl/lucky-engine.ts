@@ -1,5 +1,10 @@
 import type { LuckyActivity } from "./lucky";
 import type { StudyBlock } from "./study-now";
+import {
+  coreStudyPackHref,
+  withColdStartTopic,
+  withCourseContext,
+} from "@/lib/study/loop-hrefs";
 
 export interface LuckyEngineContext {
   missedQuestions: number;
@@ -50,7 +55,7 @@ export function buildLuckySession(context: LuckyEngineContext): LuckySessionPlan
         "understand",
         "Understand",
         5,
-        "Understand — chunk one concept",
+        "Understand — chunk one concept in Six",
         "teach-me",
         "/study/six/chunking",
       ),
@@ -62,7 +67,14 @@ export function buildLuckySession(context: LuckyEngineContext): LuckySessionPlan
   );
 
   steps.push(
-    block("challenge", "Challenge", 10, "Challenge — adaptive quiz", "quiz", "/quizzes"),
+    block(
+      "challenge",
+      "Challenge",
+      10,
+      "Challenge — Lucky quiz from topics",
+      "quiz",
+      "/quizzes",
+    ),
   );
 
   if (context.missedQuestions > 0) {
@@ -149,4 +161,36 @@ export function buildLuckySession(context: LuckyEngineContext): LuckySessionPlan
     totalMinutes: bucket,
     blocks: trimmed,
   };
+}
+
+/** Attach course + cold-start topic to Lucky engine block hrefs (Core → Six → Lucky loop). */
+export function enrichLuckyBlocksForCourse(
+  blocks: Array<StudyBlock & { phase: string }>,
+  input: {
+    courseId?: string | null;
+    coldStartTopic?: string | null;
+  },
+): Array<StudyBlock & { phase: string }> {
+  const courseId = input.courseId?.trim() || null;
+  const coldStartTopic = input.coldStartTopic?.trim() || null;
+
+  return blocks.map((block) => {
+    if (!block.href) {
+      return coldStartTopic ? { ...block, topicName: coldStartTopic } : block;
+    }
+
+    let href = block.href;
+    if (block.id === "learn" && courseId) {
+      href = coldStartTopic
+        ? coreStudyPackHref(courseId, coldStartTopic)
+        : withCourseContext("/core", courseId);
+    } else if (courseId) {
+      href = withCourseContext(href, courseId);
+    }
+    href = withColdStartTopic(href, coldStartTopic);
+
+    return coldStartTopic
+      ? { ...block, href, topicName: coldStartTopic }
+      : { ...block, href };
+  });
 }

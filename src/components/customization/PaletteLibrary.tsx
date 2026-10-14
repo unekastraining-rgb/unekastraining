@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Copy, Star, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 
+import { BulkSelectionBar } from "@/components/ui/BulkSelectionBar";
 import {
   BUILTIN_PALETTES,
   PALETTE_CATEGORIES,
@@ -13,13 +13,15 @@ import { applyStudyHaulPaletteGlobally, paletteToThemePatch } from "@/lib/custom
 import { PaletteCardGrid } from "@/components/customization/PaletteCardGrid";
 import { useCustomization } from "@/components/customization/CustomizationProvider";
 import { ColorPicker } from "@/components/customization/ColorPicker";
+import { confirmDeleteMany } from "@/lib/confirm-delete";
+import { useSelectableIds } from "@/lib/selection/use-selectable-ids";
 import { useThemeOptional } from "@/lib/theme/ThemeProvider";
 
 export function PaletteLibrary({
   onSelectColor,
   onSelectPalette,
   selectedColor,
-  applyGlobally = true,
+  applyGlobally = false,
 }: {
   onSelectColor?: (color: string) => void;
   onSelectPalette?: (colors: string[]) => void;
@@ -32,6 +34,18 @@ export function PaletteLibrary({
   const [importText, setImportText] = useState("");
   const [newPaletteName, setNewPaletteName] = useState("My palette");
   const [editingColors, setEditingColors] = useState<string[]>(["#6366f1"]);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+
+  const userPaletteIds = useMemo(
+    () => state.userPalettes.map((p) => p.id),
+    [state.userPalettes],
+  );
+  const paletteSelection = useSelectableIds(userPaletteIds);
+
+  useEffect(() => {
+    paletteSelection.pruneTo(userPaletteIds);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userPaletteIds.join("|")]);
 
   const categoryPalettes = useMemo(
     () => BUILTIN_PALETTES.filter((p) => p.categoryId === categoryId),
@@ -66,10 +80,26 @@ export function PaletteLibrary({
   async function handlePaletteSelect(colors: string[]) {
     onSelectColor?.(colors[0] ?? "");
     onSelectPalette?.(colors);
+    if (!applyGlobally) return;
     if (theme) {
       await theme.updateSettings(paletteToThemePatch(colors));
-    } else if (applyGlobally) {
+    } else {
       await applyStudyHaulPaletteGlobally(colors);
+    }
+  }
+
+  async function deleteSelectedPalettes() {
+    const ids = paletteSelection.selectedIds;
+    if (ids.length === 0) return;
+    if (!confirmDeleteMany(ids.length, { noun: "palette" })) return;
+    setBulkDeleting(true);
+    try {
+      for (const id of ids) {
+        await deletePalette(id);
+      }
+      paletteSelection.clear();
+    } finally {
+      setBulkDeleting(false);
     }
   }
 
@@ -107,12 +137,42 @@ export function PaletteLibrary({
 
       <div>
         <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400">My palettes</p>
-        <div className="mt-2">
-          <PaletteCardGrid
-            palettes={state.userPalettes}
-            onSelectPalette={(colors) => void handlePaletteSelect(colors)}
-          />
-        </div>
+        {state.userPalettes.length > 0 ? (
+          <div className="mt-2 space-y-2">
+            <BulkSelectionBar
+              totalCount={state.userPalettes.length}
+              selectedCount={paletteSelection.selectedCount}
+              allSelected={paletteSelection.allSelected}
+              someSelected={paletteSelection.someSelected}
+              onToggleAll={paletteSelection.toggleAll}
+              onClear={paletteSelection.clear}
+              onDeleteSelected={() => void deleteSelectedPalettes()}
+              deleting={bulkDeleting}
+              noun="palette"
+            />
+            <div className="space-y-2">
+              {state.userPalettes.map((palette) => (
+                <div key={palette.id} className="flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    className="mt-4 h-4 w-4 shrink-0 accent-[var(--sh-primary,#ea580c)]"
+                    checked={paletteSelection.isSelected(palette.id)}
+                    onChange={() => paletteSelection.toggle(palette.id)}
+                    aria-label={`Select ${palette.name}`}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <PaletteCardGrid
+                      palettes={[palette]}
+                      onSelectPalette={(colors) => void handlePaletteSelect(colors)}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <p className="mt-2 text-xs text-stone-400">No custom palettes yet.</p>
+        )}
       </div>
 
       <div className="rounded-xl border border-dashed border-stone-200 p-3">

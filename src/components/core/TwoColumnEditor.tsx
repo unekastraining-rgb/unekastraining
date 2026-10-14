@@ -9,11 +9,13 @@ export function TwoColumnEditor({
   rightHeader,
   rows,
   onChange,
+  bare = false,
 }: {
   leftHeader: string;
   rightHeader: string;
   rows: TwoColumnRow[];
   onChange: (data: { leftHeader: string; rightHeader: string; rows: TwoColumnRow[] }) => void;
+  bare?: boolean;
 }) {
   const updateRow = (index: number, side: "left" | "right", value: string) => {
     onChange({
@@ -31,6 +33,63 @@ export function TwoColumnEditor({
     if (rows.length <= 1) return;
     onChange({ leftHeader, rightHeader, rows: rows.filter((_, i) => i !== index) });
   };
+
+  if (bare) {
+    return (
+      <div className="px-0.5 py-0.5">
+        <div className="grid grid-cols-2 gap-2 border-b border-stone-200/60 pb-1">
+          <input
+            value={leftHeader}
+            onChange={(e) => onChange({ leftHeader: e.target.value, rightHeader, rows })}
+            className="bg-transparent text-[10px] font-semibold uppercase tracking-wider text-stone-400 outline-none"
+          />
+          <input
+            value={rightHeader}
+            onChange={(e) => onChange({ leftHeader, rightHeader: e.target.value, rows })}
+            className="bg-transparent text-[10px] font-semibold uppercase tracking-wider text-stone-400 outline-none"
+          />
+        </div>
+        <div className="mt-1 space-y-1">
+          {rows.map((row, index) => (
+            <div key={index} className="group grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-start gap-1">
+              <textarea
+                value={row.left}
+                onChange={(e) => updateRow(index, "left", e.target.value)}
+                placeholder="…"
+                rows={2}
+                className="min-w-0 resize-none bg-transparent text-sm leading-relaxed text-stone-800 outline-none placeholder:text-stone-300 [overflow-wrap:anywhere]"
+              />
+              <textarea
+                value={row.right}
+                onChange={(e) => updateRow(index, "right", e.target.value)}
+                placeholder="…"
+                rows={2}
+                className="min-w-0 resize-none bg-transparent text-sm leading-relaxed text-stone-800 outline-none placeholder:text-stone-300 [overflow-wrap:anywhere]"
+              />
+              {rows.length > 1 ? (
+                <button
+                  type="button"
+                  onClick={() => removeRow(index)}
+                  className="hidden rounded p-0.5 text-stone-300 hover:text-rose-500 group-hover:block"
+                >
+                  <Trash2 className="h-3 w-3" />
+                </button>
+              ) : (
+                <span />
+              )}
+            </div>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={addRow}
+          className="mt-1 inline-flex items-center gap-1 text-[10px] font-semibold text-stone-400 hover:text-teal-700"
+        >
+          <Plus className="h-3 w-3" /> Add row
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="p-4">

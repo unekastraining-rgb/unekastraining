@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { bindPointerResize } from "@/lib/core/canvas-transform";
 import { CANVAS_ELEMENT_BASE_Z } from "@/lib/core/canvas-layer";
+import { CoreChromeAction } from "@/components/core/CoreChromeAction";
 
 export interface TransformableRect {
   x: number;
@@ -27,7 +28,10 @@ export function TransformableElement({
   selected,
   editable = true,
   dragFromHandleOnly = false,
+  quietChrome = false,
   zIndex = CANVAS_ELEMENT_BASE_Z,
+  elementId,
+  pointerEventsNone = false,
   onChange,
   onSelect,
   onDuplicate,
@@ -41,7 +45,12 @@ export function TransformableElement({
   selected?: boolean;
   editable?: boolean;
   dragFromHandleOnly?: boolean;
+  /** Soft dashed outline + lighter handles while selected; no chrome when idle. */
+  quietChrome?: boolean;
   zIndex?: number;
+  elementId?: string;
+  /** Let ink strokes pass through this element. */
+  pointerEventsNone?: boolean;
   onChange: (patch: Partial<TransformableRect>) => void;
   onSelect?: (options?: { shiftKey?: boolean }) => void;
   onDuplicate?: () => void;
@@ -181,7 +190,14 @@ export function TransformableElement({
     <div
       ref={rootRef}
       data-canvas-element
-      className="pointer-events-auto absolute touch-manipulation"
+      data-element-id={elementId}
+      className={`${
+        pointerEventsNone ? "pointer-events-none" : "pointer-events-auto"
+      } absolute touch-manipulation ${
+        quietChrome && selected && editable
+          ? "rounded-sm outline outline-1 outline-dashed outline-orange-400/70 outline-offset-2"
+          : ""
+      }`}
       style={{
         left: display.x,
         top: display.y,
@@ -190,6 +206,7 @@ export function TransformableElement({
         zIndex,
         transform: display.rotation ? `rotate(${display.rotation}deg)` : undefined,
         transformOrigin: "center center",
+        // eslint-disable-next-line react-hooks/refs -- avoid drag-state re-render on every pointer move
         willChange: dragRef.current.active ? "left, top" : undefined,
       }}
       onPointerDown={(event) => {
@@ -199,7 +216,7 @@ export function TransformableElement({
       }}
     >
       <div
-        className={`relative h-full w-full ${editable && !rect.locked && !dragFromHandleOnly ? "cursor-move" : ""}`}
+        className={`relative h-full w-full overflow-hidden ${editable && !rect.locked && !dragFromHandleOnly ? "cursor-move" : ""}`}
         onPointerDown={dragFromHandleOnly ? undefined : startDrag}
       >
         {children}
@@ -208,61 +225,64 @@ export function TransformableElement({
       {selected && editable ? (
         <>
           <div
-            className="absolute -bottom-1.5 -right-1.5 z-10 h-4 w-4 cursor-se-resize rounded-sm border border-white bg-orange-500 shadow"
+            className={`absolute -bottom-1.5 -right-1.5 z-10 cursor-se-resize rounded-sm border border-white shadow ${
+              quietChrome ? "h-3.5 w-3.5 bg-orange-400/90" : "h-4 w-4 bg-orange-500"
+            }`}
             onPointerDown={startResize}
           />
+          {!quietChrome ? (
+            <div
+              className="absolute -top-5 left-1/2 z-10 h-4 w-4 -translate-x-1/2 cursor-grab rounded-full border border-white bg-stone-700 shadow"
+              onPointerDown={startRotate}
+              title="Rotate"
+            />
+          ) : null}
           <div
-            className="absolute -top-5 left-1/2 z-10 h-4 w-4 -translate-x-1/2 cursor-grab rounded-full border border-white bg-stone-700 shadow"
-            onPointerDown={startRotate}
-            title="Rotate"
-          />
-          <div className="absolute -top-8 right-0 z-10 flex gap-0.5 rounded-lg border border-stone-200 bg-white p-0.5 shadow-lg">
-            {onLayerForward ? (
+            data-canvas-inspector
+            className={`absolute z-10 flex gap-0.5 rounded-lg border border-stone-200 bg-white p-0.5 shadow-lg ${
+              quietChrome ? "-top-9 left-0 opacity-90" : "-top-8 right-0"
+            }`}
+          >
+            {quietChrome ? (
               <button
                 type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onLayerForward();
-                }}
+                className="cursor-grab rounded px-1.5 py-1 text-[10px] font-semibold text-stone-500 hover:bg-stone-100"
+                title="Drag to move"
+                onPointerDown={startDrag}
+              >
+                Move
+              </button>
+            ) : null}
+            {onLayerForward ? (
+              <CoreChromeAction
+                onActivate={onLayerForward}
                 className="rounded p-1 hover:bg-stone-100"
                 title="Bring forward"
               >
                 <ArrowUp className="h-3 w-3" />
-              </button>
+              </CoreChromeAction>
             ) : null}
             {onLayerBackward ? (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onLayerBackward();
-                }}
+              <CoreChromeAction
+                onActivate={onLayerBackward}
                 className="rounded p-1 hover:bg-stone-100"
                 title="Send backward"
               >
                 <ArrowDown className="h-3 w-3" />
-              </button>
+              </CoreChromeAction>
             ) : null}
             {onDuplicate ? (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDuplicate();
-                }}
+              <CoreChromeAction
+                onActivate={onDuplicate}
                 className="rounded p-1 hover:bg-stone-100"
                 title="Duplicate"
               >
                 <Copy className="h-3 w-3" />
-              </button>
+              </CoreChromeAction>
             ) : null}
             {onToggleLock ? (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onToggleLock();
-                }}
+              <CoreChromeAction
+                onActivate={onToggleLock}
                 className="rounded p-1 hover:bg-stone-100"
                 title={rect.locked ? "Unlock" : "Lock"}
               >
@@ -271,20 +291,16 @@ export function TransformableElement({
                 ) : (
                   <Lock className="h-3 w-3" />
                 )}
-              </button>
+              </CoreChromeAction>
             ) : null}
             {onDelete ? (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDelete();
-                }}
+              <CoreChromeAction
+                onActivate={onDelete}
                 className="rounded p-1 text-rose-600 hover:bg-rose-50"
                 title="Delete"
               >
                 <Trash2 className="h-3 w-3" />
-              </button>
+              </CoreChromeAction>
             ) : null}
           </div>
         </>

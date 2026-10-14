@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { MasteryTree } from "@/components/csl/MasteryTree";
+import { TOPIC_PROGRESS_LEARNER_COPY } from "@/lib/learning/mastery/mastery-truth";
 
 interface CourseOption {
   id: string;
   title: string;
+  topics?: string[];
 }
 
 interface DashboardStats {
@@ -66,8 +68,19 @@ export function EcosystemDashboard() {
         if (statsJson.success) setStats(statsJson.data);
         if (telemetryJson.success) setTelemetry(telemetryJson.data);
         if (coursesJson.success && coursesJson.courses.length > 0) {
-          setCourses(coursesJson.courses);
-          setSelectedCourseId(coursesJson.courses[0].id);
+          const rows = coursesJson.courses as Array<{
+            id: string;
+            title: string;
+            topics?: string[];
+          }>;
+          setCourses(
+            rows.map((course) => ({
+              id: course.id,
+              title: course.title,
+              topics: course.topics ?? [],
+            })),
+          );
+          setSelectedCourseId(rows[0]!.id);
         }
       } catch (error) {
         console.error("Failed to load telemetry:", error);
@@ -78,6 +91,11 @@ export function EcosystemDashboard() {
 
     void load();
   }, []);
+
+  const selectedCourse = useMemo(
+    () => courses.find((course) => course.id === selectedCourseId) ?? null,
+    [courses, selectedCourseId],
+  );
 
   if (loading) {
     return (
@@ -103,7 +121,7 @@ export function EcosystemDashboard() {
         <MetricCard label="Courses" value={stats?.activeCoursesCount ?? 0} />
         <MetricCard label="Pending Work" value={stats?.pendingAssignments ?? 0} accent="rose" />
         <MetricCard label="Cards Due" value={stats?.dueFlashcards ?? 0} accent="amber" />
-        <MetricCard label="Mastery" value={`${stats?.overallMastery ?? 0}%`} accent="teal" />
+        <MetricCard label={TOPIC_PROGRESS_LEARNER_COPY.dashboardMetricLabel} value={`${stats?.overallMastery ?? 0}%`} accent="teal" />
       </div>
 
       <div className="grid gap-4 md:grid-cols-4">
@@ -200,7 +218,7 @@ export function EcosystemDashboard() {
       {courses.length > 0 ? (
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-4">
-            <h2 className="text-lg font-bold text-stone-900">Mastery by course</h2>
+            <h2 className="text-lg font-bold text-stone-900">Topic progress by course</h2>
             <select
               value={selectedCourseId}
               onChange={(event) => setSelectedCourseId(event.target.value)}
@@ -217,7 +235,7 @@ export function EcosystemDashboard() {
         </div>
       ) : (
         <div className="card-soft p-8 text-center text-sm text-stone-500">
-          Add a course to begin mastery tracking.
+          Add a course to begin topic progress tracking.
         </div>
       )}
     </div>

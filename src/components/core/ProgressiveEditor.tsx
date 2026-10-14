@@ -7,9 +7,11 @@ import type { ProgressiveStep } from "@/lib/core/note-types";
 export function ProgressiveEditor({
   steps,
   onChange,
+  bare = false,
 }: {
   steps: ProgressiveStep[];
   onChange: (steps: ProgressiveStep[]) => void;
+  bare?: boolean;
 }) {
   const update = (index: number, patch: Partial<ProgressiveStep>) => {
     onChange(steps.map((step, i) => (i === index ? { ...step, ...patch } : step)));
@@ -23,6 +25,55 @@ export function ProgressiveEditor({
     if (steps.length <= 1) return;
     onChange(steps.filter((_, i) => i !== index));
   };
+
+  if (bare) {
+    return (
+      <div className="space-y-2 px-0.5 py-0.5">
+        {steps.map((step, index) => (
+          <div key={index} className="group relative space-y-0.5">
+            <input
+              value={step.title}
+              onChange={(event) => update(index, { title: event.target.value })}
+              placeholder={`Step ${index + 1}`}
+              className="w-full bg-transparent text-sm font-semibold text-stone-900 outline-none placeholder:text-stone-300"
+            />
+            <textarea
+              value={step.content}
+              onChange={(event) => update(index, { content: event.target.value })}
+              placeholder="Explain this step…"
+              rows={2}
+              className="w-full resize-none bg-transparent text-sm leading-relaxed text-stone-700 outline-none placeholder:text-stone-300"
+            />
+            {step.code ? (
+              <textarea
+                value={step.code}
+                onChange={(event) => update(index, { code: event.target.value })}
+                placeholder="Code / formula (optional)"
+                rows={1}
+                className="w-full resize-none bg-transparent font-mono text-xs text-stone-600 outline-none placeholder:text-stone-300"
+              />
+            ) : null}
+            {steps.length > 1 ? (
+              <button
+                type="button"
+                onClick={() => removeStep(index)}
+                className="absolute -right-1 top-0 hidden rounded p-0.5 text-stone-300 hover:text-rose-500 group-hover:block"
+              >
+                <Trash2 className="h-3 w-3" />
+              </button>
+            ) : null}
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={addStep}
+          className="inline-flex items-center gap-1 text-[10px] font-semibold text-stone-400 hover:text-teal-700"
+        >
+          <Plus className="h-3 w-3" /> Add step
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4 p-4">

@@ -22,6 +22,7 @@ export function AudioRecorderPanel({
   const chunks = useRef<Blob[]>([]);
   const startTime = useRef(0);
   const clipsRef = useRef(clips);
+  // eslint-disable-next-line react-hooks/refs -- latest clips for async recording completion
   clipsRef.current = clips;
 
   async function handleRecordingComplete() {

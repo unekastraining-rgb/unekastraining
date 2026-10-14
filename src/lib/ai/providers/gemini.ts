@@ -17,13 +17,13 @@ function formatProviderError(error: unknown): Error {
     (lower.includes("not found") && lower.includes("model"))
   ) {
     return new Error(
-      `Gemini model unavailable. Set GEMINI_MODEL=gemini-3.6-flash in .env (current default). See https://ai.google.dev/gemini-api/docs/models`,
+      `Gemini model unavailable. Set GEMINI_MODEL=gemini-2.5-flash (or gemini-3.5-flash) in .env. See https://ai.google.dev/gemini-api/docs/models`,
     );
   }
 
   if (lower.includes("quota") || lower.includes("resource exhausted")) {
     return new Error(
-      "Gemini free tier quota exceeded. Wait a bit and try again, or check usage at https://aistudio.google.com/",
+      "Gemini free tier quota exceeded. Free-tier failover will try Groq then OpenRouter when those keys are set — add GROQ_API_KEY / OPENROUTER_API_KEY in .env, or check https://aistudio.google.com/",
     );
   }
 

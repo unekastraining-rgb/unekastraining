@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { ArrowUpRight, CalendarDays, Loader2, Plus } from "lucide-react";
 
 import { useFocusParam } from "@/hooks/useFocusParam";
+import { useCompactHubNav } from "@/hooks/useCompactHubNav";
 
 import { AiCourseBuilder } from "@/components/courses/AiCourseBuilder";
 import { StudyAnythingCard } from "@/components/study/StudyAnythingCard";
@@ -23,6 +24,7 @@ import {
 import type { QuickViewMode } from "@/lib/calendar/types";
 import { localDateKey } from "@/lib/calendar/types";
 import { confirmDelete } from "@/lib/confirm-delete";
+import { pickColdStartTopic } from "@/lib/study/cold-start-topic";
 import { useTheme } from "@/lib/theme/ThemeProvider";
 
 import { HubAssignmentsPanel } from "./HubAssignmentsPanel";
@@ -74,10 +76,15 @@ export function ScheduleTab({
   gradeSchoolPlans?: HubGradeSchoolPlan[];
 }) {
   const router = useRouter();
+  const compactNav = useCompactHubNav();
   const { settings } = useTheme();
   const { focusId, focusClass } = useFocusParam();
   const { events: allEvents, items, loading, error, refresh, moveEvent } =
     useHubCalendar(selectedDate);
+
+  function refreshHubShell() {
+    if (!compactNav) router.refresh();
+  }
   const [quickView, setQuickView] = useState<QuickViewMode>(
     settings.elementaryMode ? "today" : settings.defaultQuickView,
   );
@@ -118,6 +125,9 @@ export function ScheduleTab({
   const studyNowProps = {
     courseId: courseFilterId,
     courseTitle: scopedCourse?.title ?? null,
+    focusTopic: pickColdStartTopic(
+      (scopedCourse?.topics ?? []).map((name) => ({ name })),
+    ),
   };
 
   const todayEvents = useMemo(
@@ -155,6 +165,7 @@ export function ScheduleTab({
     });
 
     if (match) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync UI state to props or external subscription
       setSelectedEventId(match.id);
       const todayKey = localDateKey(new Date());
       setQuickView(match.date === todayKey ? "today" : "week");
@@ -179,7 +190,7 @@ export function ScheduleTab({
 
   async function handleAssignmentsChanged() {
     await refresh();
-    router.refresh();
+    refreshHubShell();
     onScheduleChanged?.();
   }
 
@@ -198,7 +209,7 @@ export function ScheduleTab({
     const success = await moveEvent(id, startAt, endAt);
     if (success) {
       await refresh();
-      router.refresh();
+      refreshHubShell();
     }
   }
 
@@ -212,7 +223,7 @@ export function ScheduleTab({
 
   async function handleProposalApproved() {
     await refresh();
-    router.refresh();
+    refreshHubShell();
   }
 
   function openCreateEvent(date: Date, hour?: number) {
@@ -235,6 +246,7 @@ export function ScheduleTab({
     const response = await fetch("/api/calendar", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
       body: JSON.stringify(input),
     });
     const data = await response.json();
@@ -242,7 +254,7 @@ export function ScheduleTab({
       throw new Error(data.error ?? "Failed to create event");
     }
     await refresh();
-    router.refresh();
+    refreshHubShell();
   }
 
   function openEditEvent(event: CalendarEvent) {
@@ -260,7 +272,7 @@ export function ScheduleTab({
     if (!success) throw new Error("Failed to update event");
 
     await refresh();
-    router.refresh();
+    refreshHubShell();
   }
 
   const workspaceCourses = useMemo(
@@ -277,7 +289,7 @@ export function ScheduleTab({
     const success = await toggleHubEventComplete(event.id, completed);
     if (success) {
       await refresh();
-      router.refresh();
+      refreshHubShell();
     }
   }
 
@@ -294,7 +306,7 @@ export function ScheduleTab({
     if (success) {
       setSelectedEventId(null);
       await refresh();
-      router.refresh();
+      refreshHubShell();
     }
   }
 
@@ -313,7 +325,7 @@ export function ScheduleTab({
     if (success) {
       setSelectedEventId(null);
       await refresh();
-      router.refresh();
+      refreshHubShell();
     }
 
     setDeleteScopeOpen(false);
@@ -388,7 +400,7 @@ export function ScheduleTab({
         <GradeSchoolLearningPlan plans={gradeSchoolPlans} />
 
         <AiCourseBuilder
-          onSaved={() => router.refresh()}
+          onSaved={() => refreshHubShell()}
           onError={() => {}}
         />
 
@@ -453,7 +465,16 @@ export function ScheduleTab({
       <CalendarAiScheduling compact onApproved={handleProposalApproved} />
 
       {error ? (
-        <p className="rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p>
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          <p>{error}</p>
+          <button
+            type="button"
+            onClick={() => void refresh()}
+            className="min-h-11 rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs font-bold text-rose-800 touch-manipulation"
+          >
+            Retry
+          </button>
+        </div>
       ) : null}
 
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">

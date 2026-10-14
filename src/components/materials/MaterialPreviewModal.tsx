@@ -54,7 +54,8 @@ export function MaterialPreviewModal({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-xl border border-stone-200 p-2 text-stone-500 hover:bg-stone-50"
+            data-hub-chrome
+            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl border border-stone-200 text-stone-500 hover:bg-stone-50 touch-manipulation"
           >
             <X className="h-4 w-4" />
           </button>
@@ -94,19 +95,22 @@ export function MaterialPreviewModal({
           )}
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-orange-100 bg-white px-5 py-4">
-          <p className="text-xs text-stone-500">
-            Quick view — annotate and take notes in a Core workbook.
-          </p>
-          <button
-            type="button"
-            onClick={onOpenInCore}
-            disabled={openingCore}
-            className="inline-flex items-center gap-2 rounded-xl bg-orange-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-orange-700 disabled:opacity-60"
-          >
-            <NotebookPen className="h-4 w-4" />
-            {openingCore ? "Opening…" : "Open in Core workbook"}
-          </button>
+        <div className="flex flex-col gap-3 border-t border-orange-100 bg-white px-5 py-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-xs text-stone-500">
+              Quick view — annotate and take notes in a Core workbook.
+            </p>
+            <button
+              type="button"
+              onClick={onOpenInCore}
+              disabled={openingCore}
+              data-hub-chrome
+              className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-orange-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-orange-700 disabled:opacity-60 touch-manipulation"
+            >
+              <NotebookPen className="h-4 w-4" />
+              {openingCore ? "Opening…" : "Open in Core workbook"}
+            </button>
+          </div>
         </div>
       </div>
     </div>

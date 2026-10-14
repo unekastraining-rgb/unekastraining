@@ -2,9 +2,10 @@
 
 import { ProfileAvatarUpload } from "@/components/hub/ProfileAvatarUpload";
 import type { HubUser } from "@/components/hub/types";
+import { useClientSnapshot } from "@/hooks/useClientSnapshot";
 
-function timeGreeting() {
-  const hour = new Date().getHours();
+function timeGreeting(date = new Date()) {
+  const hour = date.getHours();
   if (hour < 12) return "Good morning";
   if (hour < 17) return "Good afternoon";
   return "Good evening";
@@ -26,6 +27,7 @@ export function HubWelcomeHeader({
   children?: React.ReactNode;
 }) {
   const displayName = displayFirstName(user);
+  const greeting = useClientSnapshot(() => timeGreeting(), () => "Welcome");
 
   return (
     <header className="card-soft relative overflow-hidden p-5">
@@ -47,10 +49,10 @@ export function HubWelcomeHeader({
             <p className="text-xs font-bold uppercase tracking-[0.2em] text-brand">{eyebrow}</p>
           ) : null}
           <h1
-            suppressHydrationWarning
             className={`text-heading ${eyebrow ? "mt-1" : ""} text-2xl font-bold sm:text-3xl`}
+            suppressHydrationWarning
           >
-            {timeGreeting()}, {displayName}
+            {greeting}, {displayName}
           </h1>
           <p className="text-body mt-1 text-sm">{subtitle}</p>
         </div>

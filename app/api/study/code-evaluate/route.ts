@@ -97,7 +97,7 @@ Return ONLY JSON:
 }`,
         },
       ],
-      { temperature: 0.2, maxTokens: 2048 },
+      { temperature: 0.2, maxTokens: 2048, includeOpenAIPro: appSettings.aiUseOpenAIPro },
     );
 
     const fenced = result.content.match(/```(?:json)?\s*([\s\S]*?)```/);

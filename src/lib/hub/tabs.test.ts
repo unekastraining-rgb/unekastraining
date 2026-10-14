@@ -35,10 +35,13 @@ describe("hub tabs", () => {
     expect(hubAssignmentsHref()).toBe("/dashboard?view=assignments");
   });
 
-  it("builds chat hrefs with course scope", () => {
+  it("builds chat hrefs with course scope and cold-start topic", () => {
     expect(hubChatHref()).toBe("/dashboard?tab=chat");
     expect(hubChatHref({ courseId: "c1", prompt: "help" })).toBe(
       "/dashboard?tab=chat&courseId=c1&prompt=help",
+    );
+    expect(hubChatHref({ courseId: "c1", topic: "Osmosis" })).toBe(
+      "/dashboard?tab=chat&courseId=c1&topic=Osmosis",
     );
   });
 

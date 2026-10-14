@@ -2,10 +2,12 @@ import { NextResponse } from "next/server";
 
 import { evaluateGradeSchoolThinking } from "@/lib/grade-school/check-thinking";
 import { requireGradeSchoolMode } from "@/lib/grade-school";
+import { getUserAppSettings } from "@/lib/settings/app-settings";
 
 export async function POST(request: Request) {
   try {
-    await requireGradeSchoolMode();
+    const { user } = await requireGradeSchoolMode();
+    const appSettings = await getUserAppSettings(user.id);
     const body = await request.json();
 
     const userAnswer = typeof body.userAnswer === "string" ? body.userAnswer.trim() : "";
@@ -34,6 +36,7 @@ export async function POST(request: Request) {
       subject: typeof body.subject === "string" ? body.subject : null,
       mode,
       sampleAnswer: typeof body.sampleAnswer === "string" ? body.sampleAnswer : null,
+      includeOpenAIPro: appSettings.aiUseOpenAIPro,
     });
 
     return NextResponse.json({ success: true, feedback });

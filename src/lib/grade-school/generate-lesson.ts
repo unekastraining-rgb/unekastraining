@@ -95,6 +95,7 @@ async function requestLesson(
   userPrompt: string,
   systemContent: string,
   compact: boolean,
+  includeOpenAIPro?: boolean,
 ): Promise<string> {
   const result = await aiService.complete(
     [
@@ -108,6 +109,7 @@ async function requestLesson(
       temperature: compact ? 0.3 : 0.45,
       maxTokens: compact ? 4096 : 8192,
       jsonMode: true,
+      includeOpenAIPro,
     },
   );
 
@@ -122,6 +124,7 @@ export async function generateInteractiveLesson(input: {
   learningStep: GradeSchoolLearningStep;
   courseSummary?: string | null;
   learnerSummary?: string | null;
+  includeOpenAIPro?: boolean;
 }): Promise<InteractiveLesson> {
   const subjectKind = detectSubjectKind(input.subject);
 
@@ -151,6 +154,7 @@ export async function generateInteractiveLesson(input: {
       userPrompt,
       "You design kid-friendly interactive lessons. Respond with valid JSON only.",
       false,
+      input.includeOpenAIPro,
     );
     const lesson = parseLessonContent(content);
     return { ...lesson, subjectKind: lesson.subjectKind ?? subjectKind };
@@ -161,6 +165,7 @@ export async function generateInteractiveLesson(input: {
       userPrompt,
       "You design kid-friendly interactive lessons. Respond with compact valid JSON only.",
       true,
+      input.includeOpenAIPro,
     );
     const lesson = parseLessonContent(content);
     return { ...lesson, subjectKind: lesson.subjectKind ?? subjectKind };

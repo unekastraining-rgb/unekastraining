@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { parseCurriculumFromMaterial } from "@/lib/grade-school/learning-plan";
 import { generateCollegeLearningPlan } from "@/lib/lms/course-info/generate-college-learning-plan";
 import { SYLLABUS_PLAN_MATERIAL_TITLE } from "@/lib/syllabus/enrich-course-from-syllabus";
+import { getUserAppSettings } from "@/lib/settings/app-settings";
 import { getOrCreateDefaultUser } from "@/lib/user";
 
 export async function GET(
@@ -72,9 +73,11 @@ export async function POST(
       );
     }
 
+    const appSettings = await getUserAppSettings(user.id);
     const plan = await generateCollegeLearningPlan({
       courseName: course.title,
       courseInfoJson: course.courseInfoJson,
+      includeOpenAIPro: appSettings.aiUseOpenAIPro,
     });
 
     return NextResponse.json({ success: true, plan });

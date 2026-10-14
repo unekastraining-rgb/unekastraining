@@ -39,34 +39,22 @@ async function writePaletteColors(userId: string, paletteColors: string[] | null
 export async function getOrCreateUserPreferences(
   userId: string,
 ): Promise<UserThemeSettings> {
-  const existing = await db.userPreferences.findUnique({
+  // Upsert avoids P2002 races when layout + page create prefs concurrently
+  // (first Study Hub load for a new learner).
+  const row = await db.userPreferences.upsert({
     where: { userId },
-  });
-
-  if (existing) {
-    return {
-      themeTemplate: existing.themeTemplate as UserThemeSettings["themeTemplate"],
-      primaryColor: existing.primaryColor,
-      backgroundColor: existing.backgroundColor,
-      accentColor: existing.accentColor,
-      paletteColors: readPaletteColors(existing.settingsJson),
-      elementaryMode: existing.elementaryMode,
-      defaultQuickView: existing.defaultQuickView as UserThemeSettings["defaultQuickView"],
-    };
-  }
-
-  const created = await db.userPreferences.create({
-    data: { userId },
+    create: { userId },
+    update: {},
   });
 
   return {
-    themeTemplate: created.themeTemplate as UserThemeSettings["themeTemplate"],
-    primaryColor: created.primaryColor,
-    backgroundColor: created.backgroundColor,
-    accentColor: created.accentColor,
-    paletteColors: readPaletteColors(created.settingsJson),
-    elementaryMode: created.elementaryMode,
-    defaultQuickView: created.defaultQuickView as UserThemeSettings["defaultQuickView"],
+    themeTemplate: row.themeTemplate as UserThemeSettings["themeTemplate"],
+    primaryColor: row.primaryColor,
+    backgroundColor: row.backgroundColor,
+    accentColor: row.accentColor,
+    paletteColors: readPaletteColors(row.settingsJson),
+    elementaryMode: row.elementaryMode,
+    defaultQuickView: row.defaultQuickView as UserThemeSettings["defaultQuickView"],
   };
 }
 

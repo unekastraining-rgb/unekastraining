@@ -29,12 +29,26 @@ export function setMaterialOpenPreference(mode: MaterialOpenMode) {
 export async function fetchMaterialPreview(
   materialId: string,
 ): Promise<MaterialPreviewPayload> {
-  const response = await fetch(`/api/materials/${materialId}/open`);
-  const data = await response.json();
-  if (!data.success) {
-    throw new Error(data.error ?? "Could not load material.");
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 12_000);
+  try {
+    const response = await fetch(`/api/materials/${materialId}/open`, {
+      credentials: "same-origin",
+      signal: controller.signal,
+    });
+    const data = await response.json();
+    if (!data.success) {
+      throw new Error(data.error ?? "Could not load material.");
+    }
+    return data.material as MaterialPreviewPayload;
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error("Material preview took too long. Try again or cancel import.");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
   }
-  return data.material as MaterialPreviewPayload;
 }
 
 export async function openMaterialInCore(

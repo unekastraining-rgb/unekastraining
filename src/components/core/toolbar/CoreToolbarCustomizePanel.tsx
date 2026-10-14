@@ -5,7 +5,7 @@ import { ALL_TOOLBAR_ITEMS } from "@/lib/core/core-toolbar-defaults";
 import type { CoreToolbarItemId } from "@/lib/core/core-toolbar-types";
 
 const ITEM_LABELS: Record<CoreToolbarItemId, string> = {
-  chat: "Chat",
+  chat: "Assist",
   readWrite: "Read / Write",
   select: "Select",
   lasso: "Lasso",
@@ -16,6 +16,7 @@ const ITEM_LABELS: Record<CoreToolbarItemId, string> = {
   stickers: "Stickers",
   images: "Images",
   templates: "Templates",
+  starters: "Starters",
   shapes: "Shapes",
   sticky: "Sticky notes",
   laser: "Laser pointer",

@@ -37,7 +37,7 @@ export function RecurrenceScopeDialog({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-stone-900/40 p-4 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[600] flex items-center justify-center bg-stone-900/40 p-4 backdrop-blur-sm">
       <div className="w-full max-w-md rounded-3xl border border-orange-100 bg-white p-6 shadow-2xl">
         <h2 className="text-lg font-bold text-stone-900">
           {action === "delete" ? "Delete repeating event" : "Edit repeating event"}

@@ -1,4 +1,4 @@
-import { aiService } from "@/lib/ai";
+import { completeForUser } from "@/lib/ai/complete-for-user";
 import { parseAiJson } from "@/lib/ai/parse-json-response";
 import { db } from "@/lib/db";
 import { getOrCreateDefaultTopic } from "@/lib/topics";
@@ -30,7 +30,8 @@ export async function generateLessonFlashcards(input: {
     )
     .join("\n");
 
-  const result = await aiService.complete(
+  const result = await completeForUser(
+    input.userId,
     [
       {
         role: "system",

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
+import { readableCourseName } from "@/lib/courses/display-name";
 import { getOrCreateDefaultUser } from "@/lib/user";
 
 export async function GET(request: Request) {
@@ -40,7 +41,7 @@ export async function GET(request: Request) {
     const data = [
       {
         id: course.id,
-        title: course.title,
+        title: readableCourseName(course),
         topics: course.topics.map((topic) => {
           const mastery = topic.masteries[0];
           return {

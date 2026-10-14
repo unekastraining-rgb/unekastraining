@@ -16,13 +16,23 @@ import {
 } from "lucide-react";
 
 import { launchStudyNowSession } from "@/lib/study/client-launch";
+import { useTapHandler } from "@/hooks/useTapHandler";
+import {
+  blurtingHref,
+  coreStudyPackHref,
+  luckyQuizHref,
+  sixChunkingHref,
+  teachMeHref,
+} from "@/lib/study/loop-hrefs";
 import type { StudyTopicProfile } from "@/lib/study-topic/types";
 
 export function StudyTopicToolkit({
   courseId,
+  courseTitle,
   studyTopic,
 }: {
   courseId: string;
+  courseTitle: string;
   studyTopic: StudyTopicProfile;
 }) {
   const router = useRouter();
@@ -34,7 +44,7 @@ export function StudyTopicToolkit({
     setSessionError(null);
     try {
       await launchStudyNowSession({ minutes: 20, courseId });
-      router.push("/study/session");
+      router.push(`/study/session?minutes=20&courseId=${encodeURIComponent(courseId)}`);
     } catch (err) {
       setSessionError(err instanceof Error ? err.message : "Failed to start session");
     } finally {
@@ -42,53 +52,54 @@ export function StudyTopicToolkit({
     }
   }
 
+  const topicFocus = studyTopic.title?.trim() || "notes";
+
   const actions = [
     {
       label: "Core notes",
       description: "Read, annotate, chat with sources",
-      href: `/core?courseId=${courseId}`,
+      href: `/core?courseId=${encodeURIComponent(courseId)}`,
       icon: FileText,
-      tone: "teal",
     },
     {
       label: "Teach it back",
       description: "Explain in simple terms",
-      href: `/study/teach-me?courseId=${courseId}`,
+      href: teachMeHref(courseId, null, topicFocus),
       icon: MessageCircle,
-      tone: "violet",
     },
     {
       label: "Blurting",
       description: "Recall without looking",
-      href: `/study/blurting?courseId=${courseId}`,
+      href: blurtingHref(courseId, null, topicFocus),
       icon: Brain,
-      tone: "orange",
     },
     {
       label: "Flashcards",
       description: "Review and generate cards",
-      href: `/flashcards?courseId=${courseId}`,
+      href: `/flashcards?courseId=${encodeURIComponent(courseId)}&topic=${encodeURIComponent(topicFocus)}`,
       icon: Layers,
-      tone: "amber",
     },
     {
       label: "Quizzes",
-      description: "Test what you know",
-      href: `/quizzes?courseId=${courseId}`,
+      description: "Browse saved quizzes",
+      href: luckyQuizHref(courseId, null, topicFocus),
       icon: ClipboardList,
-      tone: "stone",
     },
     {
       label: "Full study hub",
       description: "Six, Lucky, mixed review",
-      href: `/study?courseId=${courseId}`,
+      href: `/study?courseId=${encodeURIComponent(courseId)}`,
       icon: Sparkles,
-      tone: "violet",
     },
   ] as const;
 
+  const tapStudyNow = useTapHandler(() => void startStudyNow());
+
   return (
-    <section className="rounded-3xl border border-violet-200 bg-gradient-to-br from-violet-50/80 to-white p-6 shadow-sm">
+    <section
+      data-hub-chrome
+      className="rounded-3xl border border-violet-200 bg-gradient-to-br from-violet-50/80 to-white p-6 shadow-sm"
+    >
       <p className="text-xs font-bold uppercase tracking-wider text-violet-700">
         Study topic · no syllabus required
       </p>
@@ -100,8 +111,8 @@ export function StudyTopicToolkit({
         <button
           type="button"
           disabled={loadingSession}
-          onClick={() => void startStudyNow()}
-          className="inline-flex items-center gap-2 rounded-xl bg-stone-900 px-5 py-2.5 text-sm font-bold text-white hover:bg-stone-800 disabled:opacity-60"
+          {...tapStudyNow}
+          className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-stone-900 px-5 py-2.5 text-sm font-bold text-white hover:bg-stone-800 disabled:opacity-60 touch-manipulation"
         >
           {loadingSession ? (
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -111,8 +122,29 @@ export function StudyTopicToolkit({
           Study Now (20 min)
         </button>
         <Link
+          href={luckyQuizHref(courseId, null, topicFocus)}
+          className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-violet-500 touch-manipulation"
+        >
+          <ClipboardList className="h-4 w-4" />
+          Make quiz from topics
+        </Link>
+        <Link
+          href={coreStudyPackHref(courseId, studyTopic.title)}
+          className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-violet-300 bg-violet-50 px-4 py-2.5 text-sm font-bold text-violet-900 hover:bg-violet-100 touch-manipulation"
+        >
+          <Sparkles className="h-4 w-4" />
+          Study pack in Core
+        </Link>
+        <Link
+          href={sixChunkingHref(courseId, studyTopic.title || "topics")}
+          className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-teal-300 bg-teal-50 px-4 py-2.5 text-sm font-bold text-teal-900 hover:bg-teal-100 touch-manipulation"
+        >
+          <Layers className="h-4 w-4" />
+          Chunk in Six
+        </Link>
+        <Link
           href={`/core?courseId=${courseId}`}
-          className="inline-flex items-center gap-2 rounded-xl border border-teal-300 bg-teal-50 px-4 py-2.5 text-sm font-bold text-teal-800 hover:bg-teal-100"
+          className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-teal-300 bg-teal-50 px-4 py-2.5 text-sm font-bold text-teal-800 hover:bg-teal-100 touch-manipulation"
         >
           <BookOpen className="h-4 w-4" />
           Open in Core
@@ -147,7 +179,7 @@ export function StudyTopicToolkit({
           <Link
             key={action.label}
             href={action.href}
-            className="group rounded-2xl border border-orange-100 bg-white p-4 transition hover:border-violet-200 hover:shadow-sm"
+            className="group min-h-11 rounded-2xl border border-orange-100 bg-white p-4 transition touch-manipulation hover:border-violet-200 hover:shadow-sm"
           >
             <action.icon className="h-5 w-5 text-violet-600" />
             <p className="mt-2 font-bold text-stone-900">{action.label}</p>

@@ -2,33 +2,71 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useState } from "react";
-import { ArrowRight, Clock, Loader2, Play, Sparkles } from "lucide-react";
+import { Suspense, useMemo, useState } from "react";
+import { ArrowRight, Loader2, Play } from "lucide-react";
 
 import { GradeSchoolLearningPlan } from "@/components/grade-school/GradeSchoolLearningPlan";
 import type { HubGradeSchoolPlan } from "@/components/hub/types";
-import { SixRecommendationsPanel } from "@/components/study/SixRecommendationsPanel";
+import { AddCourseMaterialButton } from "@/components/materials/AddCourseMaterialModal";
+import { LearnerGrowthContinuityStrip } from "@/components/study/LearnerGrowthContinuityStrip";
+import { StudyHaulLearningCenter } from "@/components/study/StudyHaulLearningCenter";
+import { StudyHubLearnerContext } from "@/components/study/StudyHubLearnerContext";
+import { BetaFeedbackWidget } from "@/components/study/BetaFeedbackWidget";
+import { TopicStudyHaul } from "@/components/study/TopicStudyHaul";
 import { saveStudySession } from "@/components/study/StudySessionRunner";
+import { useTapHandler } from "@/hooks/useTapHandler";
+import type { LearnerGrowthHubTeaser } from "@/lib/learning/learner-growth";
+import { hubTabPath } from "@/lib/hub/tabs";
 
-import { LUCKY_ACTIVITIES, LUCKY_PROCESS } from "@/lib/csl/lucky";
-import { SIX_ACTIVITIES } from "@/lib/csl/six";
-import { sixGuideHref } from "@/lib/csl/six-guides";
 import type { StudyBlock, StudyMinutes, StudyNowTopicPick } from "@/lib/csl/study-now";
+import { readableCourseTitle } from "@/lib/courses/display-name";
+import type { CourseLearningBucket } from "@/lib/study/course-learning-bucket";
+import {
+  coursesScanLandingHref,
+  teachMeHref,
+} from "@/lib/study/loop-hrefs";
+import { resolveUrlCourseId } from "@/lib/study/resolve-url-course-id";
+import { resolveLoopFocusTopic } from "@/lib/study/resolve-loop-focus-topic";
 
 const TIME_OPTIONS: StudyMinutes[] = [5, 10, 20, 30, 45, 60];
+
+type HubCourse = {
+  id: string;
+  title: string;
+  focusTopic?: string | null;
+  topics?: string[];
+  learningBucket?: CourseLearningBucket;
+};
+
+export type UpcomingSchoolWorkItem = {
+  id: string;
+  title: string;
+  dueDate: string | null;
+  courseId: string;
+  courseTitle: string;
+  status: string;
+  conceptId: string | null;
+  alignmentState?: "confirmed" | "inferred" | "unaligned";
+};
 
 export function StudyHubView({
   courses,
   elementaryMode = false,
   gradeSchoolPlans = [],
+  growthContinuityTeaser = null,
+  upcomingSchoolWork = [],
 }: {
-  courses: Array<{ id: string; title: string }>;
+  courses: HubCourse[];
   elementaryMode?: boolean;
   gradeSchoolPlans?: Array<
     Pick<HubGradeSchoolPlan, "courseId" | "courseTitle" | "curriculum"> & {
       courseColor?: string | null;
     }
   >;
+  /** 2P-43 — SSR continuity teaser from the same Growth Center resolve. */
+  growthContinuityTeaser?: LearnerGrowthHubTeaser | null;
+  /** 2P-49 — upcoming school deadlines (logistics; learning CTAs reuse ContinueLearningButton). */
+  upcomingSchoolWork?: UpcomingSchoolWorkItem[];
 }) {
   return (
     <Suspense fallback={<div className="px-6 py-10 text-sm text-stone-500">Loading study hub…</div>}>
@@ -39,6 +77,8 @@ export function StudyHubView({
           ...plan,
           courseColor: plan.courseColor ?? null,
         }))}
+        growthContinuityTeaser={growthContinuityTeaser}
+        upcomingSchoolWork={upcomingSchoolWork}
       />
     </Suspense>
   );
@@ -48,14 +88,27 @@ function StudyHubViewContent({
   courses,
   elementaryMode,
   gradeSchoolPlans,
+  growthContinuityTeaser,
+  upcomingSchoolWork,
 }: {
-  courses: Array<{ id: string; title: string }>;
+  courses: HubCourse[];
   elementaryMode: boolean;
   gradeSchoolPlans: HubGradeSchoolPlan[];
+  growthContinuityTeaser: LearnerGrowthHubTeaser | null;
+  upcomingSchoolWork: UpcomingSchoolWorkItem[];
 }) {
+  // Schoolwork stays in courses/planner — intentionally not rendered on Study Haul.
+  void upcomingSchoolWork;
+
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [selectedCourseId, setSelectedCourseId] = useState(courses[0]?.id ?? "");
+  const selectedCourseId = resolveUrlCourseId(
+    searchParams.get("courseId"),
+    courses.map((course) => course.id),
+  );
+  const urlTopic = searchParams.get("topic")?.trim() || null;
+  const urlMaterialId = searchParams.get("materialId")?.trim() || null;
+  const [topicPick, setTopicPick] = useState<{ courseId: string; topic: string } | null>(null);
   const [minutes, setMinutes] = useState<StudyMinutes>(30);
   const [loading, setLoading] = useState(false);
   const [plan, setPlan] = useState<{
@@ -63,6 +116,8 @@ function StudyHubViewContent({
     totalMinutes: StudyMinutes;
     blocks: StudyBlock[];
     focusTopics?: StudyNowTopicPick[];
+    courseId?: string | null;
+    courseTitle?: string | null;
     context: {
       missedQuestions: number;
       dueFlashcards: number;
@@ -70,27 +125,36 @@ function StudyHubViewContent({
     };
   } | null>(null);
 
-  useEffect(() => {
-    const courseId = searchParams.get("courseId");
-    if (courseId && courses.some((course) => course.id === courseId)) {
-      setSelectedCourseId(courseId);
-    }
-  }, [searchParams, courses]);
-
   const selectedCourse = useMemo(
     () => courses.find((course) => course.id === selectedCourseId),
     [courses, selectedCourseId],
   );
 
+  // A topic picked for one class shouldn't leak into the next one.
+  const topicChoice = topicPick?.courseId === selectedCourseId ? topicPick.topic : "";
+
+  const coldStartTopic = useMemo(
+    () => resolveLoopFocusTopic(topicChoice || urlTopic, selectedCourse?.topics ?? []),
+    [topicChoice, urlTopic, selectedCourse?.topics],
+  );
+
   function startSession() {
     if (!plan) return;
+    const effectiveCourseId =
+      plan.courseId?.trim() || selectedCourseId.trim() || null;
+    const effectiveCourse =
+      courses.find((course) => course.id === effectiveCourseId) ?? selectedCourse;
     saveStudySession({
       summary: plan.summary,
       totalMinutes: plan.totalMinutes,
       blocks: plan.blocks,
       context: plan.context,
+      courseId: effectiveCourseId,
+      courseTitle: plan.courseTitle ?? effectiveCourse?.title ?? null,
     });
-    router.push("/study/session");
+    const query = new URLSearchParams({ minutes: String(plan.totalMinutes) });
+    if (effectiveCourseId) query.set("courseId", effectiveCourseId);
+    router.push(`/study/session?${query.toString()}`);
   }
 
   async function buildPlan() {
@@ -105,87 +169,145 @@ function StudyHubViewContent({
         }),
       });
       const data = await response.json();
-      if (data.success) setPlan(data.data);
+      if (data.success) {
+        setPlan(data.data);
+        if (typeof data.data.courseId === "string" && data.data.courseId.trim()) {
+          selectCourse(data.data.courseId.trim());
+        }
+      }
     } finally {
       setLoading(false);
     }
   }
 
-  return (
-    <div className="hub-shell space-y-10 py-6 lg:py-8">
-      <div>
-        <p className="text-xs font-bold uppercase tracking-[0.2em] text-brand">
-          {elementaryMode ? "Grade school study" : "CSL Learning System"}
-        </p>
-        <h1 className="mt-1 text-3xl font-black text-stone-900">Study Hub</h1>
-        <p className="mt-2 max-w-2xl text-stone-600">
-          {elementaryMode ? (
-            "Guided lessons that build skills step by step — like a tutor in the browser."
-          ) : (
-            <>
-              <strong>Core</strong> organizes it. <strong>Six</strong> teaches you to understand it.{" "}
-              <strong>Lucky</strong> makes you retain it. AI recommends — you decide.
-            </>
-          )}
-        </p>
-      </div>
+  const tap5 = useTapHandler(() => setMinutes(5));
+  const tap10 = useTapHandler(() => setMinutes(10));
+  const tap20 = useTapHandler(() => setMinutes(20));
+  const tap30 = useTapHandler(() => setMinutes(30));
+  const tap45 = useTapHandler(() => setMinutes(45));
+  const tap60 = useTapHandler(() => setMinutes(60));
+  const minuteTaps: Record<StudyMinutes, ReturnType<typeof useTapHandler>> = {
+    5: tap5,
+    10: tap10,
+    20: tap20,
+    30: tap30,
+    45: tap45,
+    60: tap60,
+  };
+  const tapBuildPlan = useTapHandler(() => void buildPlan());
+  const tapStartSession = useTapHandler(() => startSession());
 
-      {elementaryMode ? (
-        <>
-          <GradeSchoolLearningPlan plans={gradeSchoolPlans} />
-          <section className="rounded-3xl border border-teal-200 bg-teal-50/50 p-6">
-            <h2 className="text-lg font-bold text-stone-900">Explain it back</h2>
-            <p className="mt-2 text-sm text-stone-600">
-              After a guided lesson, practice teaching what you learned in your own words.
-            </p>
-            <Link
-              href="/study/teach-me"
-              className="mt-4 inline-flex items-center gap-2 rounded-xl bg-teal-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-teal-500"
-            >
-              Open teach-me practice
-              <ArrowRight className="h-4 w-4" />
-            </Link>
-          </section>
-        </>
-      ) : (
-        <>
-      <section className="card-soft p-6">
-        <div className="flex items-center gap-2">
-          <Clock className="h-5 w-5 text-brand" />
-          <h2 className="text-xl font-bold text-stone-900">Study Now</h2>
-        </div>
-        <p className="mt-2 text-sm text-stone-600">
-          {selectedCourse
-            ? `How much time do you have for ${selectedCourse.title}? We'll recommend a focused session.`
-            : "How much time do you have? We'll recommend a session — you can change any block."}
-        </p>
-        {courses.length > 0 ? (
-          <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center">
-            <label className="text-sm font-semibold text-stone-700" htmlFor="study-course">
-              Class
-            </label>
+  const courseTopics = selectedCourse?.topics ?? [];
+
+
+  function selectCourse(courseId: string, topicOverride?: string) {
+    const course = courses.find((c) => c.id === courseId);
+    const nextTopic =
+      topicOverride !== undefined
+        ? topicOverride.trim()
+        : course?.focusTopic?.trim() || course?.topics?.[0] || "";
+    if (nextTopic) {
+      setTopicPick({ courseId, topic: nextTopic });
+    } else {
+      setTopicPick(null);
+    }
+    // Shareable HOW context — clear portal so journey advances.
+    const params = new URLSearchParams();
+    if (courseId) params.set("courseId", courseId);
+    if (nextTopic) params.set("topic", nextTopic);
+    router.replace(params.toString() ? `/study?${params.toString()}` : "/study", {
+      scroll: false,
+    });
+  }
+
+  const sessionBuilder = (
+    <section
+      data-hub-chrome
+      data-study-session-builder
+      className="card-soft scroll-mt-24 p-5 sm:p-6 touch-manipulation"
+    >
+      <h2 className="text-xl font-bold text-stone-900">Start Studying</h2>
+      <p className="mt-1 text-sm text-stone-600">
+        {selectedCourse
+          ? `Sitting down for a study session? Build a timed plan for ${readableCourseTitle(selectedCourse.title)}${
+              coldStartTopic ? ` — starting with ${coldStartTopic}` : ""
+            }. This is a session builder — not another home screen.`
+          : "Sitting down for a study session? Choose what you're studying and how long you have — this builds a timed plan, not a second home screen."}
+      </p>
+
+      {courses.length > 0 ? (
+        <div className="mt-5 grid gap-3 sm:grid-cols-2">
+          <label className="block">
+            <span className="text-xs font-bold uppercase tracking-wider text-stone-500">
+              What you&apos;re studying
+            </span>
             <select
               id="study-course"
               value={selectedCourseId}
-              onChange={(event) => setSelectedCourseId(event.target.value)}
-              className="max-w-md flex-1 rounded-xl border border-brand bg-white px-3 py-2 text-sm"
+              onChange={(event) => selectCourse(event.target.value)}
+              className="mt-1 min-h-11 w-full rounded-xl border border-brand bg-white px-3 py-2 text-sm font-semibold text-stone-800"
             >
-              <option value="">All classes</option>
+              <option value="">Pick a subject</option>
               {courses.map((course) => (
                 <option key={course.id} value={course.id}>
-                  {course.title}
+                  {readableCourseTitle(course.title)}
                 </option>
               ))}
             </select>
-          </div>
-        ) : null}
-        <div className="mt-4 flex flex-wrap gap-2">
+          </label>
+          <label className="block">
+            <span className="text-xs font-bold uppercase tracking-wider text-stone-500">
+              Topic
+            </span>
+            <select
+              id="study-topic"
+              value={topicChoice}
+              onChange={(event) =>
+                setTopicPick({
+                  courseId: selectedCourseId,
+                  topic: event.target.value,
+                })
+              }
+              disabled={courseTopics.length === 0}
+              className="mt-1 min-h-11 w-full rounded-xl border border-brand bg-white px-3 py-2 text-sm font-semibold text-stone-800 disabled:bg-stone-50 disabled:text-stone-400"
+            >
+              <option value="">
+                {!selectedCourseId
+                  ? "Pick a class first"
+                  : courseTopics.length === 0
+                    ? "No topics yet"
+                    : coldStartTopic
+                      ? `Suggested — ${coldStartTopic}`
+                      : "Suggested topic"}
+              </option>
+              {courseTopics.map((topic) => (
+                <option key={topic} value={topic}>
+                  {topic}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      ) : (
+        <Link
+          href="/courses"
+          className="mt-4 inline-flex min-h-11 items-center gap-1 text-sm font-semibold text-brand hover:underline touch-manipulation"
+        >
+          Add a class to get started <ArrowRight className="h-4 w-4" />
+        </Link>
+      )}
+
+      <div className="mt-5">
+        <span className="text-xs font-bold uppercase tracking-wider text-stone-500">
+          How long do you have?
+        </span>
+        <div className="mt-2 flex flex-wrap gap-2">
           {TIME_OPTIONS.map((option) => (
             <button
               key={option}
               type="button"
-              onClick={() => setMinutes(option)}
-              className={`rounded-full px-4 py-2 text-sm font-semibold ${
+              {...minuteTaps[option]}
+              className={`min-h-10 rounded-full px-4 py-2 text-sm font-semibold touch-manipulation ${
                 minutes === option
                   ? "btn-primary text-white"
                   : "border border-brand bg-white text-stone-700"
@@ -195,146 +317,155 @@ function StudyHubViewContent({
             </button>
           ))}
         </div>
-        <button
-          type="button"
-          onClick={() => void buildPlan()}
-          disabled={loading}
-          className="btn-primary mt-4 inline-flex items-center gap-2 px-5 py-2.5 text-sm disabled:opacity-60"
-        >
-          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-          Build my session
-        </button>
+      </div>
 
-        {plan ? (
-          <div className="mt-6 space-y-3 rounded-2xl border border-brand bg-white p-5">
-            <p className="font-semibold text-stone-900">{plan.summary}</p>
-            {plan.focusTopics && plan.focusTopics.length > 0 ? (
-              <p className="text-sm text-brand-muted" style={{ color: "var(--sh-accent)" }}>
-                Mastery focus:{" "}
-                {plan.focusTopics
-                  .map((topic) => `${topic.topicName} (${topic.proficiency}%)`)
-                  .join(" · ")}
-              </p>
-            ) : null}
-            {plan.blocks.map((block, index) => (
-              <div
-                key={`${block.id}-${index}`}
-                className="flex items-center justify-between gap-3 rounded-xl border border-brand bg-brand-soft/40 px-4 py-3"
-              >
-                <div>
-                  <p className="text-sm font-semibold text-stone-900">{block.label}</p>
-                  {block.subtitle ? (
-                    <p className="text-xs" style={{ color: "var(--sh-accent)" }}>{block.subtitle}</p>
-                  ) : null}
-                  <p className="text-xs text-stone-500">{block.minutes} minutes</p>
-                </div>
-                {block.href ? (
-                  <Link
-                    href={block.href}
-                    className="inline-flex items-center gap-1 text-sm font-semibold text-brand hover:underline"
-                  >
-                    Start <ArrowRight className="h-4 w-4" />
-                  </Link>
+      <button
+        type="button"
+        id="study-now"
+        {...tapBuildPlan}
+        disabled={loading}
+        className="btn-primary mt-5 inline-flex min-h-14 w-full items-center justify-center gap-2 px-6 py-4 text-base font-bold disabled:opacity-60 touch-manipulation sm:text-lg"
+      >
+        {loading ? (
+          <Loader2 className="h-5 w-5 animate-spin" />
+        ) : (
+          <Play className="h-5 w-5" />
+        )}
+        {loading ? "Building your session…" : `Study now · ${minutes} min`}
+      </button>
+
+      {plan ? (
+        <div className="mt-6 space-y-3 rounded-2xl border border-brand bg-white p-5">
+          <p className="font-semibold text-stone-900">{plan.summary}</p>
+          {plan.focusTopics && plan.focusTopics.length > 0 ? (
+            <p className="text-sm text-brand-muted" style={{ color: "var(--sh-accent)" }}>
+              Topic progress focus:{" "}
+              {plan.focusTopics
+                .map((topic) => `${topic.topicName} (${topic.proficiency}%)`)
+                .join(" · ")}
+            </p>
+          ) : null}
+          {plan.blocks.map((block, index) => (
+            <div
+              key={`${block.id}-${index}`}
+              className="flex items-center justify-between gap-3 rounded-xl border border-brand bg-brand-soft/40 px-4 py-3"
+            >
+              <div>
+                <p className="text-sm font-semibold text-stone-900">{block.label}</p>
+                {block.subtitle ? (
+                  <p className="text-xs" style={{ color: "var(--sh-accent)" }}>{block.subtitle}</p>
                 ) : null}
+                <p className="text-xs text-stone-500">{block.minutes} minutes</p>
               </div>
-            ))}
-            <p className="text-xs text-stone-500">
-              {plan.context.missedQuestions} missed · {plan.context.dueFlashcards} cards due ·{" "}
-              {plan.context.weakTopics} weak topics
-            </p>
-            <button
-              type="button"
-              onClick={startSession}
-              className="btn-accent mt-4 inline-flex w-full items-center justify-center gap-2 px-5 py-3 text-sm"
-            >
-              <Play className="h-4 w-4" />
-              Start guided session
-            </button>
-          </div>
-        ) : null}
-      </section>
-
-      <section className="space-y-4">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-wider text-teal-600">Core · Organize</p>
-            <h2 className="text-xl font-bold text-stone-900">Intelligent note-taking</h2>
-            <p className="mt-1 text-sm text-stone-600">
-              Outline, Cornell, sketch, speak, and annotate course PDFs.
-            </p>
-          </div>
-          <Link
-            href={selectedCourseId ? `/core?courseId=${selectedCourseId}` : "/core"}
-            className="rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-500"
-          >
-            Open Core Notes
-          </Link>
-        </div>
-      </section>
-
-      <SixRecommendationsPanel courseId={selectedCourseId || undefined} />
-
-      <section className="space-y-4">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-wider text-teal-600">Six · Understand</p>
-          <h2 className="text-xl font-bold text-stone-900">Six Technique</h2>
-          <p className="mt-1 text-sm text-stone-600">
-            Chunking, explanation, Feynman, visualization, hands-on practice, and active recall.
+              {block.href ? (
+                <Link
+                  href={block.href}
+                  data-hub-chrome
+                  className="inline-flex min-h-11 items-center gap-1 text-sm font-semibold text-brand hover:underline touch-manipulation"
+                >
+                  Start <ArrowRight className="h-4 w-4" />
+                </Link>
+              ) : null}
+            </div>
+          ))}
+          <p className="text-xs text-stone-500">
+            {plan.context.missedQuestions} missed · {plan.context.dueFlashcards} cards due ·{" "}
+            {plan.context.weakTopics} weak topics
           </p>
-        </div>
-        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-          {SIX_ACTIVITIES.map((activity) => (
-            <Link
-              key={activity.id}
-              href={sixGuideHref(activity.id)}
-              className="card-interactive block p-5"
-            >
-              <div className="text-2xl">{activity.emoji}</div>
-              <p className="mt-2 font-bold text-stone-900">{activity.title}</p>
-              <p className="mt-1 text-sm text-stone-600">{activity.description}</p>
-              <p className="mt-2 text-xs text-stone-500">Use when: {activity.whenToUse}</p>
-              <span className="mt-3 inline-block text-sm font-semibold text-teal-600">
-                Start guided session →
-              </span>
-            </Link>
-          ))}
-        </div>
-      </section>
-
-      <section className="space-y-4">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-wider text-violet-600">Lucky · Retain</p>
-            <h2 className="text-xl font-bold text-stone-900">Lucky Technique</h2>
-            <p className="mt-1 text-sm text-stone-600">
-              {LUCKY_PROCESS.join(" → ")}
-            </p>
-          </div>
-          <Link
-            href="/study/lucky"
-            className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-500"
+          <button
+            type="button"
+            {...tapStartSession}
+            className="btn-accent mt-4 inline-flex min-h-12 w-full items-center justify-center gap-2 px-5 py-3 text-sm font-bold touch-manipulation"
           >
-            <Sparkles className="h-4 w-4" />
-            Start Lucky Engine
-          </Link>
+            <Play className="h-4 w-4" />
+            Start guided session
+          </button>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {LUCKY_ACTIVITIES.map((activity) => (
+      ) : null}
+
+      <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-stone-200/80 pt-4 text-xs text-stone-500">
+        <span className="font-semibold text-stone-600">No topics yet?</span>
+        <AddCourseMaterialButton
+          courseId={selectedCourseId || null}
+          courses={courses}
+          label="Add course material"
+          compact
+          onAdded={() => router.refresh()}
+        />
+        <Link
+          href={coursesScanLandingHref(selectedCourseId || null)}
+          className="inline-flex min-h-9 items-center rounded-xl border border-stone-300 bg-white px-2.5 py-1.5 font-semibold text-stone-700 hover:bg-stone-50 touch-manipulation"
+        >
+          Photo syllabus (OCR)
+        </Link>
+        <Link
+          href={hubTabPath("settings")}
+          className="inline-flex min-h-9 items-center rounded-xl border border-stone-300 bg-white px-2.5 py-1.5 font-semibold text-stone-700 hover:bg-stone-50 touch-manipulation"
+        >
+          Sync Canvas / LMS
+        </Link>
+      </div>
+    </section>
+  );
+
+  return (
+    <div className="hub-shell space-y-8 py-6 lg:py-8">
+      {elementaryMode ? (
+        <>
+          <header>
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-brand">
+              Grade school study
+            </p>
+            <h1 className="mt-1 text-3xl font-black text-stone-900">Study Hub</h1>
+            <p className="mt-2 max-w-2xl text-stone-600">
+              Pick a class → follow the guided lesson → explain it back in your own words.
+            </p>
+          </header>
+          <StudyHubLearnerContext />
+          <div data-study-primary-actions className="space-y-3">
+            <LearnerGrowthContinuityStrip teaser={growthContinuityTeaser} />
+          </div>
+          <GradeSchoolLearningPlan plans={gradeSchoolPlans} />
+          {selectedCourse && selectedCourseId ? (
+            <TopicStudyHaul
+              courseId={selectedCourseId}
+              courseTitle={readableCourseTitle(selectedCourse.title)}
+              topic={coldStartTopic}
+              materialId={urlMaterialId}
+            />
+          ) : null}
+          <section className="rounded-3xl border border-teal-200 bg-teal-50/50 p-6">
+            <h2 className="text-lg font-bold text-stone-900">Explain it back</h2>
+            <p className="mt-2 text-sm text-stone-600">
+              After a guided lesson, practice teaching what you learned in your own words.
+            </p>
             <Link
-              key={activity.id}
-              href={activity.href}
-              className="card-interactive flex flex-col p-5"
+              href={teachMeHref(selectedCourseId || null, null, coldStartTopic)}
+              className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-xl bg-teal-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-teal-500 touch-manipulation"
             >
-              <div className="text-2xl">{activity.emoji}</div>
-              <p className="mt-2 font-bold text-stone-900">{activity.title}</p>
-              <p className="mt-1 flex-1 text-sm text-stone-600">{activity.description}</p>
-              <span className="mt-3 text-sm font-semibold text-violet-600">Open →</span>
+              Open teach-me practice
+              <ArrowRight className="h-4 w-4" />
             </Link>
-          ))}
-        </div>
-      </section>
+          </section>
+          <div id="start-studying" className="scroll-mt-24">
+            {sessionBuilder}
+          </div>
         </>
+      ) : (
+        <StudyHaulLearningCenter
+          courses={courses}
+          selectedCourseId={selectedCourseId}
+          selectedCourse={selectedCourse}
+          coldStartTopic={coldStartTopic}
+          materialId={urlMaterialId}
+          growthContinuityTeaser={growthContinuityTeaser}
+          onSelectCourse={selectCourse}
+          sessionBuilder={sessionBuilder}
+        />
       )}
+
+      <BetaFeedbackWidget surface="study-hub" />
     </div>
   );
 }
+

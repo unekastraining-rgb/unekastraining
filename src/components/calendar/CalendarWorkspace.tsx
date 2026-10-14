@@ -71,9 +71,10 @@ export function CalendarWorkspace({
     setFormOpen(true);
   }
 
-  function openEdit() {
-    if (!workspace.selectedItem) return;
-    setFormInitial({ ...workspace.selectedItem, id: workspace.selectedItem.id });
+  function openEdit(item?: WorkspaceCalendarItem | null) {
+    const target = item ?? workspace.selectedItem;
+    if (!target?.id) return;
+    setFormInitial({ ...target, id: target.id });
     setFormOpen(true);
   }
 
@@ -167,7 +168,7 @@ export function CalendarWorkspace({
 
   return (
     <CalendarAppearanceProvider settings={workspace.settings}>
-    <div className="flex min-h-[calc(100vh-57px)] flex-col lg:flex-row" style={{ backgroundColor: "var(--cal-bg)" }}>
+    <div className="flex min-h-0 flex-1 flex-col lg:flex-row" style={{ backgroundColor: "var(--cal-bg)" }}>
       <div className="lg:hidden">
         <div
           className="flex items-center gap-2 border-b px-4 py-2 backdrop-blur-xl"
@@ -222,16 +223,23 @@ export function CalendarWorkspace({
         <div className="flex flex-1 gap-4 overflow-hidden p-4">
           <div className="min-w-0 flex-1 overflow-y-auto transition-all duration-300">
             {workspace.error ? (
-              <p className="mb-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                {workspace.error}
-              </p>
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                <p>{workspace.error}</p>
+                <button
+                  type="button"
+                  onClick={() => void workspace.refresh()}
+                  className="rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs font-bold text-rose-800 touch-manipulation"
+                >
+                  Retry
+                </button>
+              </div>
             ) : null}
 
-            {workspace.loading && workspace.items.length === 0 ? (
+            {workspace.loading ? (
               <CalendarGridSkeleton />
             ) : null}
 
-            {!workspace.loading || workspace.items.length > 0 ? (
+            {!workspace.loading ? (
               <>
                 {workspace.view === "month" ? (
                   <MonthView
@@ -296,18 +304,19 @@ export function CalendarWorkspace({
           <div className="hidden w-80 shrink-0 xl:block">
             <EventDetailDrawer
               open={Boolean(workspace.selectedItem)}
+              variant="rail"
               item={workspace.selectedItem}
               relatedItems={relatedItems}
               onClose={() => {
                 setDrawerOpen(false);
                 workspace.setSelectedId(null);
               }}
-              onEdit={openEdit}
+              onEdit={() => openEdit(workspace.selectedItem)}
               onToggleComplete={async (completed) => {
                 if (!workspace.selectedItem) return;
                 await workspace.updateEvent(workspace.selectedItem.id, { completed });
               }}
-              onReschedule={openEdit}
+              onReschedule={() => openEdit(workspace.selectedItem)}
               onDelete={
                 workspace.selectedItem &&
                 (workspace.selectedItem.editable ||
@@ -331,18 +340,19 @@ export function CalendarWorkspace({
         <div className="xl:hidden">
           <EventDetailDrawer
             open
+            variant="overlay"
             item={workspace.selectedItem}
             relatedItems={relatedItems}
             onClose={() => {
               setDrawerOpen(false);
               workspace.setSelectedId(null);
             }}
-            onEdit={openEdit}
+            onEdit={() => openEdit(workspace.selectedItem)}
             onToggleComplete={async (completed) => {
               if (!workspace.selectedItem) return;
               await workspace.updateEvent(workspace.selectedItem.id, { completed });
             }}
-            onReschedule={openEdit}
+            onReschedule={() => openEdit(workspace.selectedItem)}
             onDelete={() => void handleDelete(workspace.selectedItem!)}
           />
         </div>

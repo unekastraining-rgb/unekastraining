@@ -47,7 +47,7 @@ export function CalendarToolbar({
         <button
           type="button"
           onClick={onPrev}
-          className={`${buttonClass} p-2`}
+          className={`${buttonClass} min-h-11 min-w-11 touch-manipulation p-2`}
           style={{
             borderColor: appearance.gridLineColor,
             color: appearance.textColor,
@@ -59,7 +59,7 @@ export function CalendarToolbar({
         <button
           type="button"
           onClick={onNext}
-          className={`${buttonClass} p-2`}
+          className={`${buttonClass} min-h-11 min-w-11 touch-manipulation p-2`}
           style={{
             borderColor: appearance.gridLineColor,
             color: appearance.textColor,
@@ -71,7 +71,7 @@ export function CalendarToolbar({
         <button
           type="button"
           onClick={onToday}
-          className={buttonClass}
+          className={`${buttonClass} min-h-11 touch-manipulation`}
           style={{
             borderColor: appearance.accentColor,
             backgroundColor: appearance.accentColor,

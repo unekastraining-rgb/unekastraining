@@ -1,9 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Calendar, Loader2, Plus, Trash2, X } from "lucide-react";
 
-import { confirmDelete } from "@/lib/confirm-delete";
+import { BulkSelectionBar } from "@/components/ui/BulkSelectionBar";
+import { confirmDelete, confirmDeleteMany } from "@/lib/confirm-delete";
+import { useSelectableIds } from "@/lib/selection/use-selectable-ids";
 import type { HubCourse, HubMeeting } from "./types";
 
 const DAY_OPTIONS = [
@@ -67,6 +69,17 @@ export function ClassMeetingsModal({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const meetingIds = useMemo(
+    () => courseMeetings.map((m) => m.id),
+    [courseMeetings],
+  );
+  const meetingSelection = useSelectableIds(meetingIds);
+
+  useEffect(() => {
+    meetingSelection.pruneTo(meetingIds);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meetingIds.join("|")]);
 
   if (!open) return null;
 
@@ -141,8 +154,33 @@ export function ClassMeetingsModal({
     onChanged();
   }
 
+  async function deleteSelectedMeetings() {
+    const ids = meetingSelection.selectedIds;
+    if (ids.length === 0) return;
+    if (!confirmDeleteMany(ids.length, { noun: "meeting" })) return;
+    setBulkDeleting(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/meetings", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
+      });
+      const data = await response.json();
+      if (!data.success) {
+        setError(data.error ?? "Failed to delete meetings");
+        return;
+      }
+      if (editingId && ids.includes(editingId)) resetForm();
+      meetingSelection.clear();
+      onChanged();
+    } finally {
+      setBulkDeleting(false);
+    }
+  }
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40 p-4">
+    <div className="fixed inset-0 z-[600] flex items-center justify-center bg-stone-900/40 p-4">
       <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-3xl border border-brand bg-white shadow-2xl">
         <div className="flex items-start justify-between border-b border-brand px-6 py-5">
           <div>
@@ -175,13 +213,37 @@ export function ClassMeetingsModal({
               </p>
             </div>
           ) : (
+            <div className="space-y-3">
+              <BulkSelectionBar
+                totalCount={courseMeetings.length}
+                selectedCount={meetingSelection.selectedCount}
+                allSelected={meetingSelection.allSelected}
+                someSelected={meetingSelection.someSelected}
+                onToggleAll={meetingSelection.toggleAll}
+                onClear={meetingSelection.clear}
+                onDeleteSelected={() => void deleteSelectedMeetings()}
+                deleting={bulkDeleting}
+                noun="meeting"
+              />
             <ul className="space-y-2">
               {courseMeetings.map((meeting) => (
                 <li
                   key={meeting.id}
-                  className="flex items-center justify-between gap-3 rounded-2xl border border-brand px-4 py-3"
+                  className={`flex items-center justify-between gap-3 rounded-2xl border px-4 py-3 ${
+                    meetingSelection.isSelected(meeting.id)
+                      ? "border-[var(--sh-primary,#ea580c)] bg-brand-soft/40"
+                      : "border-brand"
+                  }`}
                 >
-                  <div>
+                  <div className="flex min-w-0 items-start gap-3">
+                    <input
+                      type="checkbox"
+                      className="mt-1 h-4 w-4 accent-[var(--sh-primary,#ea580c)]"
+                      checked={meetingSelection.isSelected(meeting.id)}
+                      onChange={() => meetingSelection.toggle(meeting.id)}
+                      aria-label={`Select ${meeting.title ?? "meeting"}`}
+                    />
+                    <div>
                     <p className="font-semibold text-stone-900">
                       {meeting.title ?? "Class"}
                     </p>
@@ -190,6 +252,7 @@ export function ClassMeetingsModal({
                       –{formatTime(meeting.endTime)}
                       {meeting.location ? ` · ${meeting.location}` : ""}
                     </p>
+                    </div>
                   </div>
                   <div className="flex gap-1">
                     <button
@@ -211,6 +274,7 @@ export function ClassMeetingsModal({
                 </li>
               ))}
             </ul>
+            </div>
           )}
 
           <div className="rounded-2xl border border-brand bg-brand-soft/30 p-4">

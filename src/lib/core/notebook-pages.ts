@@ -1,5 +1,5 @@
 import type { CoreFormatId } from "@/lib/core/format-catalog";
-import { defaultBlockRect, ensureBlockPositions } from "@/lib/core/block-layout";
+import { ensureBlockPositions, packStudyBlocks, bottomOfSections, originYForTypedNotes } from "@/lib/core/block-layout";
 import type {
   CompositeSection,
   DecorationKind,
@@ -27,12 +27,19 @@ import {
 } from "./note-types";
 import { createEmptySectionData } from "./section-format-data";
 import { getFormatDefinition } from "./format-catalog";
+import {
+  findPageAtCell,
+  nextCellInDirection,
+  withPageGridLayout,
+  type PageGrowDirection,
+} from "./notebook-page-layout";
 
 export type { CompositeSection, DecorationKind, PageDecoration };
 
 export interface PageData {
   tool: NoteTool;
   typed: string;
+  typedHtml?: string;
   strokes: SketchStroke[];
   annotations?: SketchStroke[];
   cornell?: NoteDocument["cornell"];
@@ -54,6 +61,9 @@ export interface PageData {
   fontSize?: number;
   fontFamily?: string;
   activeFormat?: CoreFormatId;
+  pageTemplateId?: import("@/lib/core/page-templates").PageTemplateId;
+  /** Smart Study Guide workspace for this page only. Blank manual pages omit this. */
+  studyTemplateId?: string;
 }
 
 function rid(prefix: string) {
@@ -68,6 +78,7 @@ export function extractPageData(doc: NoteDocument): PageData {
   return {
     tool: doc.tool,
     typed: doc.typed,
+    typedHtml: doc.typedHtml,
     strokes: doc.strokes ?? [],
     annotations: doc.annotations,
     cornell: doc.cornell,
@@ -91,6 +102,8 @@ export function extractPageData(doc: NoteDocument): PageData {
     fontSize: doc.metadata?.fontSize ?? 15,
     fontFamily: doc.metadata?.fontFamily ?? "inherit",
     activeFormat: doc.metadata?.activeFormat,
+    pageTemplateId: doc.notebook?.pageTemplateId,
+    studyTemplateId: doc.metadata?.studyTemplateId,
   };
 }
 
@@ -99,6 +112,7 @@ export function applyPageData(doc: NoteDocument, data: PageData): NoteDocument {
     ...doc,
     tool: data.tool,
     typed: data.typed,
+    typedHtml: data.typedHtml,
     strokes: data.strokes,
     annotations: data.annotations,
     cornell: data.cornell,
@@ -116,31 +130,54 @@ export function applyPageData(doc: NoteDocument, data: PageData): NoteDocument {
     pageTextBoxes: data.pageTextBoxes,
     pageImages: data.pageImages,
     decorations: data.decorations,
+    notebook: {
+      ...doc.notebook,
+      pageTemplateId: data.pageTemplateId ?? doc.notebook?.pageTemplateId,
+    },
     metadata: {
       ...doc.metadata,
       activeFormat: data.activeFormat,
       compositeSections: data.compositeSections,
       fontSize: data.fontSize,
       fontFamily: data.fontFamily,
+      studyTemplateId: data.studyTemplateId,
     },
   };
 }
 
 export function getNotebookPages(doc: NoteDocument): NotebookPagesContainer {
   if (doc.metadata?.notebookPages) {
+    const raw = doc.metadata.notebookPages.pages.map((page) => ({
+      ...page,
+      data: page.data as unknown as PageData,
+    })) as unknown as NotebookPageRecord[];
+    const laidOut = withPageGridLayout(raw);
     return {
       activePageId: doc.metadata.notebookPages.activePageId,
-      pages: doc.metadata.notebookPages.pages.map((page) => ({
-        ...page,
-        data: page.data as unknown as PageData,
-      })) as unknown as NotebookPageRecord[],
+      pages: laidOut.map((page) => ({
+        id: page.id,
+        pageNumber: page.pageNumber,
+        label: page.label,
+        data: page.data,
+        gridRow: page.gridRow,
+        gridCol: page.gridCol,
+      })),
     };
   }
   const data = extractPageData(doc);
   const id = rid("pg");
   return {
     activePageId: id,
-    pages: [{ id, pageNumber: 1, label: "Page 1", data: data as unknown as Record<string, unknown> }],
+    pages: [
+      {
+        id,
+        pageNumber: 1,
+        label: "Page 1",
+        gridRow: 0,
+        gridCol: 0,
+        data: data as unknown as Record<string, unknown>,
+      },
+    ],
   };
 }
 
@@ -157,13 +194,69 @@ export function pagesFromDoc(doc: NoteDocument): {
   };
 }
 
-export function ensureNotebookPages(doc: NoteDocument): NoteDocument {
-  if (doc.metadata?.notebookPages) return doc;
-  const container = getNotebookPages(doc);
-  return {
-    ...doc,
-    metadata: { ...doc.metadata, notebookPages: container },
+/**
+ * Hydrate-only merge: prefer non-empty live fields, else fall back to stored
+ * page data so open does not show a blank canvas when ink lives in
+ * metadata.notebookPages.pages[].data.
+ *
+ * Do NOT use this on the save path — intentional clears (empty live arrays)
+ * must win. Use {@link prepareNoteDocumentForSave} instead.
+ */
+export function mergePageDataPreserveContent(
+  live: PageData,
+  stored: PageData | undefined,
+): PageData {
+  const prefer = <T,>(next: T[] | undefined, prev: T[] | undefined): T[] => {
+    if (Array.isArray(next) && next.length > 0) return next;
+    if (Array.isArray(prev) && prev.length > 0) return prev;
+    return next ?? prev ?? [];
   };
+  const preferText = (next: string | undefined, prev: string | undefined) => {
+    if (typeof next === "string" && next.trim()) return next;
+    if (typeof prev === "string" && prev.trim()) return prev;
+    return next ?? prev ?? "";
+  };
+  return {
+    ...(stored ?? live),
+    ...live,
+    strokes: prefer(live.strokes, stored?.strokes),
+    annotations: prefer(live.annotations, stored?.annotations),
+    decorations: prefer(live.decorations, stored?.decorations),
+    pageImages: prefer(live.pageImages, stored?.pageImages),
+    pageTextBoxes: prefer(live.pageTextBoxes, stored?.pageTextBoxes),
+    typed: preferText(live.typed, stored?.typed),
+    typedHtml: preferText(live.typedHtml, stored?.typedHtml),
+  };
+}
+
+/**
+ * Save path: live top-level page fields are authoritative (including empty
+ * clears). Sync into metadata.notebookPages without re-hydrating old strokes.
+ * Callers must hydrate on open/select via {@link ensureNotebookPages} first.
+ */
+export function prepareNoteDocumentForSave(doc: NoteDocument): NoteDocument {
+  return syncCurrentPage(doc);
+}
+
+export function ensureNotebookPages(doc: NoteDocument): NoteDocument {
+  // Always hydrate top-level fields from the active page. Saved notes keep
+  // strokes/typed/etc. in metadata.notebookPages.pages[].data; without this,
+  // open shows an empty canvas even when ink exists on the active page.
+  if (doc.metadata?.notebookPages) {
+    const { activeData } = pagesFromDoc(doc);
+    const merged = mergePageDataPreserveContent(extractPageData(doc), activeData);
+    return applyPageData(doc, merged);
+  }
+  const container = getNotebookPages(doc);
+  const first = container.pages[0];
+  const data = (first?.data as unknown as PageData) ?? extractPageData(doc);
+  return applyPageData(
+    {
+      ...doc,
+      metadata: { ...doc.metadata, notebookPages: container },
+    },
+    data,
+  );
 }
 
 export function syncCurrentPage(doc: NoteDocument): NoteDocument {
@@ -186,7 +279,8 @@ export function syncCurrentPage(doc: NoteDocument): NoteDocument {
 }
 
 export function switchNotebookPage(doc: NoteDocument, pageId: string): NoteDocument {
-  const synced = syncCurrentPage(doc);
+  // Hydrate first so an empty live canvas cannot wipe ink still stored on the page.
+  const synced = syncCurrentPage(ensureNotebookPages(doc));
   const container = synced.metadata!.notebookPages!;
   const next = container.pages.find((p) => p.id === pageId);
   if (!next) return synced;
@@ -202,15 +296,34 @@ export function switchNotebookPage(doc: NoteDocument, pageId: string): NoteDocum
   );
 }
 
-export function addNotebookPage(doc: NoteDocument): NoteDocument {
+export function addNotebookPage(
+  doc: NoteDocument,
+  options?: { label?: string; direction?: PageGrowDirection },
+): NoteDocument {
   const synced = syncCurrentPage(doc);
-  const container = synced.metadata!.notebookPages!;
+  const container = getNotebookPages(synced);
+  const active =
+    withPageGridLayout(container.pages).find((p) => p.id === container.activePageId) ??
+    withPageGridLayout(container.pages)[0];
+  const direction = options?.direction ?? "below";
+  const cell = active
+    ? nextCellInDirection(active, direction)
+    : { gridRow: container.pages.length, gridCol: 0 };
+
+  // If the target cell is occupied, walk further in that direction.
+  let target = cell;
+  while (findPageAtCell(container.pages, target.gridRow, target.gridCol)) {
+    target = nextCellInDirection(target, direction);
+  }
+
   const nextNumber = container.pages.length + 1;
   const id = rid("pg");
-  const newPage = {
+  const newPage: NotebookPageRecord = {
     id,
     pageNumber: nextNumber,
-    label: `Page ${nextNumber}`,
+    label: options?.label?.trim() || `Page ${nextNumber}`,
+    gridRow: target.gridRow,
+    gridCol: target.gridCol,
     data: emptyPageData() as unknown as Record<string, unknown>,
   };
   return applyPageData(
@@ -225,6 +338,14 @@ export function addNotebookPage(doc: NoteDocument): NoteDocument {
   );
 }
 
+/** FreeNotes-style: grow the desk down or to the right from the active sheet. */
+export function addNotebookPageInDirection(
+  doc: NoteDocument,
+  direction: PageGrowDirection,
+): NoteDocument {
+  return addNotebookPage(doc, { direction });
+}
+
 export function duplicateNotebookPage(doc: NoteDocument, pageId: string): NoteDocument {
   const synced = syncCurrentPage(doc);
   const container = synced.metadata!.notebookPages!;
@@ -236,6 +357,8 @@ export function duplicateNotebookPage(doc: NoteDocument, pageId: string): NoteDo
     id,
     pageNumber: container.pages.length + 1,
     label: `${(source as NotebookPageRecord).label ?? "Page"} (copy)`,
+    gridRow: (source.gridRow ?? container.pages.length - 1) + 1,
+    gridCol: source.gridCol ?? 0,
     data: copyData as unknown as Record<string, unknown>,
   };
   return applyPageData(
@@ -352,13 +475,15 @@ export function buildCompositePageData(
   sectionTitles: string[],
 ): PageData {
   const data = emptyPageData();
-  data.compositeSections = formatIds.map((formatId, index) => ({
-    id: rid("sec"),
-    formatId,
-    title: sectionTitles[index] ?? getFormatDefinition(formatId).label,
-    data: createEmptySectionData(formatId),
-    ...defaultBlockRect(index),
-  }));
+  data.compositeSections = packStudyBlocks(
+    formatIds.map((formatId, index) => ({
+      id: rid("sec"),
+      formatId,
+      title: sectionTitles[index] ?? getFormatDefinition(formatId).label,
+      data: createEmptySectionData(formatId),
+    })),
+    { originY: 48 },
+  );
   data.activeFormat = formatIds[0];
   return data;
 }
@@ -375,18 +500,20 @@ export function appendCompositeSections(
   );
   if (toAdd.length === 0) return data;
 
-  const startIndex = existing.length;
-  const newSections: CompositeSection[] = toAdd.map((formatId, index) => ({
+  const created: CompositeSection[] = toAdd.map((formatId) => ({
     id: rid("sec"),
     formatId,
     title: getFormatDefinition(formatId).label,
     data: createEmptySectionData(formatId),
-    ...defaultBlockRect(startIndex + index),
   }));
+  const originY = existing.length
+    ? bottomOfSections(existing) + 40
+    : originYForTypedNotes(data.typed);
+  const packed = packStudyBlocks(created, { originY });
 
   return {
     ...data,
-    compositeSections: [...existing, ...newSections],
+    compositeSections: [...existing, ...packed],
     activeFormat: "BLANK",
   };
 }
@@ -439,7 +566,18 @@ export function createDecoration(
     case "arrow":
       return { ...base, w: options?.w ?? 100, h: options?.h ?? 24, color: color || "#44403c" };
     case "line":
-      return { ...base, w: options?.w ?? 120, h: options?.h ?? 8, color: color || "#44403c" };
+      return { ...base, w: options?.w ?? 180, h: options?.h ?? 6, color: color || "#44403c" };
+    case "vline":
+      return { ...base, w: options?.w ?? 6, h: options?.h ?? 180, color: color || "#44403c" };
+    case "border_frame":
+      return {
+        ...base,
+        w: options?.w ?? 220,
+        h: options?.h ?? 160,
+        color: color || "#44403c",
+        fillOpacity: 0,
+        borderColor: color || "#44403c",
+      };
     case "dot":
       return { ...base, w: options?.w ?? 16, h: options?.h ?? 16, color: color || "#0d9488" };
     default:

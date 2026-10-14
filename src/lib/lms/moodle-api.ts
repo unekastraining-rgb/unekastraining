@@ -218,7 +218,7 @@ export async function fetchMoodleCalendarEvents(
   }
 }
 
-/** Calendar quiz/assign close events that are not already in mod_assign. */
+/** Calendar quiz/assign/forum close events that are not already in mod_assign. */
 export function moodleCalendarEventsToAssignments(
   events: MoodleCalendarEvent[],
 ): Array<{ name: string; duedate: number; kind: "quiz" | "assignment"; intro?: string }> {
@@ -229,17 +229,24 @@ export function moodleCalendarEventsToAssignments(
 
   for (const event of events) {
     const modulename = event.modulename ?? "";
-    if (modulename !== "quiz" && modulename !== "assign") continue;
+    if (modulename !== "quiz" && modulename !== "assign" && modulename !== "forum") {
+      continue;
+    }
 
     const kind = modulename === "quiz" ? "quiz" : "assignment";
     const key = `${modulename}:${event.instance ?? event.id}`;
     const eventtype = (event.eventtype ?? "").toLowerCase();
-    const name = event.name.replace(/\s+(opens|closes)$/i, "").trim();
+    const name = event.name
+      .replace(/\s+(opens|closes|is due)$/i, "")
+      .trim();
 
     let score = 0;
     if (eventtype === "due" || eventtype === "close") score = 3;
-    else if (/\bdue\b/i.test(event.name)) score = 2;
+    else if (/\bis due\b|\bdue\b/i.test(event.name)) score = 2;
     else if (eventtype === "open") score = 1;
+
+    // Forums only become assignments for due/close (not open-only noise).
+    if (modulename === "forum" && score < 2) continue;
 
     const existing = bestByKey.get(key);
     if (existing && existing.score >= score) continue;

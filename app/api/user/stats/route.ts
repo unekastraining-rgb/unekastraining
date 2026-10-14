@@ -4,6 +4,7 @@ import { AssignmentStatus } from "@/generated/prisma";
 import { buildProgressSnapshot } from "@/lib/csl/progress";
 import { countQuizAttempts } from "@/lib/quizzes/attempts";
 import { db } from "@/lib/db";
+import { readableCourseTitle } from "@/lib/courses/display-name";
 import { getOrCreateDefaultUser } from "@/lib/user";
 
 export async function GET() {
@@ -54,7 +55,7 @@ export async function GET() {
             in: [AssignmentStatus.NOT_STARTED, AssignmentStatus.IN_PROGRESS],
           },
         },
-        include: { course: { select: { title: true } } },
+        include: { course: { select: { title: true, code: true } } },
         orderBy: { dueDate: "asc" },
       }),
     ]);
@@ -77,7 +78,10 @@ export async function GET() {
         upcomingAssignment: upcomingAssignment
           ? {
               title: upcomingAssignment.title,
-              course: upcomingAssignment.course.title,
+              course: readableCourseTitle(
+                upcomingAssignment.course.title,
+                upcomingAssignment.course.code,
+              ),
               dueDate: upcomingAssignment.dueDate?.toISOString() ?? null,
             }
           : null,

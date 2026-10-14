@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from "react";
 
+import { TOPIC_PROGRESS_LEARNER_COPY } from "@/lib/learning/mastery/mastery-truth";
+
 interface TopicNode {
   id: string;
   name: string;
@@ -19,6 +21,10 @@ interface CourseModule {
   topics: TopicNode[];
 }
 
+/**
+ * Topic/course progress tree (TopicMastery via /api/mastery).
+ * Not Universal Learning Engine ConceptMastery — see mastery-truth boundary (2G-62).
+ */
 export function MasteryTree({ courseId }: { courseId: string }) {
   const [modules, setModules] = useState<CourseModule[]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,7 +38,7 @@ export function MasteryTree({ courseId }: { courseId: string }) {
           setModules(data.data);
         }
       } catch (error) {
-        console.error("Failed to load mastery telemetry tree:", error);
+        console.error("Failed to load topic progress tree:", error);
       } finally {
         setLoading(false);
       }
@@ -43,25 +49,25 @@ export function MasteryTree({ courseId }: { courseId: string }) {
   if (loading) {
     return (
       <div className="card-soft p-8 text-center text-xs text-stone-500 animate-pulse">
-        Loading mastery tree...
+        {TOPIC_PROGRESS_LEARNER_COPY.loading}
       </div>
     );
   }
 
   return (
-    <div className="card-soft space-y-6 p-6">
+    <div className="space-y-6" data-topic-progress-tree>
       <div className="border-b border-orange-100 pb-4">
-        <h3 className="text-lg font-bold text-stone-900">Course mastery hierarchy</h3>
+        <h3 className="text-lg font-bold text-stone-900">
+          {TOPIC_PROGRESS_LEARNER_COPY.treeHeading}
+        </h3>
         <p className="mt-1 text-xs text-stone-500">
-          Proficiency across topics in this course.
+          {TOPIC_PROGRESS_LEARNER_COPY.treeSubtitle}
         </p>
       </div>
 
       <div className="space-y-6">
         {modules.length === 0 || modules.every((mod) => mod.topics.length === 0) ? (
-          <p className="text-sm text-stone-500">
-            No mastery data yet. Study with Lucky, quizzes, or flashcards to populate this tree.
-          </p>
+          <p className="text-sm text-stone-500">{TOPIC_PROGRESS_LEARNER_COPY.empty}</p>
         ) : (
           modules.map((mod) => (
             <div key={mod.id} className="space-y-3 rounded-2xl border border-orange-100 bg-orange-50/30 p-4">

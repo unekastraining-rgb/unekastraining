@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname } from "next/navigation";
 import {
   Backpack,
+  BookOpen,
   CalendarDays,
   FileText,
   FolderOpen,
@@ -13,12 +14,14 @@ import {
   Settings,
 } from "lucide-react";
 
-import { hubTabPath, parseHubTab } from "@/lib/hub/tabs";
+import { useCompactHubNav } from "@/hooks/useCompactHubNav";
+import { hubTabPath } from "@/lib/hub/tabs";
 
 import type { HubTab } from "./types";
 
 type MobileNavItem =
   | { id: "hub"; label: string; icon: typeof LayoutDashboard; href: string }
+  | { id: "study"; label: string; icon: typeof BookOpen; href: string }
   | { id: "calendar"; label: string; icon: typeof CalendarDays; href: string }
   | { id: "resources"; label: string; icon: typeof FolderOpen; href: string }
   | { id: "core"; label: string; icon: typeof FileText; href: string }
@@ -27,12 +30,13 @@ type MobileNavItem =
 
 const mobileNavItems: MobileNavItem[] = [
   { id: "hub", label: "Hub", icon: LayoutDashboard, href: "/dashboard" },
+  { id: "study", label: "Study", icon: BookOpen, href: "/study" },
+  { id: "core", label: "Core", icon: FileText, href: "/core" },
   { id: "calendar", label: "Calendar", icon: CalendarDays, href: "/calendar" },
   { id: "resources", label: "Resources", icon: FolderOpen, href: "/resources" },
-  { id: "core", label: "Core", icon: FileText, href: "/core" },
   {
     id: "classes",
-    label: "Classes",
+    label: "My Courses",
     icon: GraduationCap,
     href: hubTabPath("classes"),
     tab: "classes",
@@ -67,20 +71,24 @@ export function BottomNav({
   active: HubTab;
   onChange: (tab: HubTab) => void;
 }) {
+  const compactNav = useCompactHubNav();
   const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const urlTab = pathname.startsWith("/dashboard") ? parseHubTab(searchParams.get("tab")) : active;
+  const urlTab = active;
   const coreActive = pathname.startsWith("/core");
+  const studyActive = pathname.startsWith("/study");
   const resourcesActive = pathname.startsWith("/resources");
   const calendarActive = pathname.startsWith("/calendar");
   const onDashboard = pathname.startsWith("/dashboard");
 
+  if (!compactNav) return null;
+
   return (
     <nav
-      className="fixed inset-x-0 bottom-0 z-50 border-t backdrop-blur-xl md:hidden"
+      data-hub-chrome
+      className="fixed inset-x-0 bottom-0 z-50 border-t"
       style={{
         borderColor: "var(--sh-border)",
-        background: "color-mix(in srgb, var(--sh-surface-card) 92%, transparent)",
+        background: "var(--sh-surface-card, #fffaf5)",
         paddingBottom: "max(0.5rem, env(safe-area-inset-bottom))",
       }}
     >
@@ -90,13 +98,15 @@ export function BottomNav({
           const isActive =
             item.id === "core"
               ? coreActive
-              : item.id === "resources"
-                ? resourcesActive
-                : item.id === "calendar"
-                  ? calendarActive
-                  : item.id === "hub"
-                    ? onDashboard && urlTab === "hub"
-                    : onDashboard && "tab" in item && urlTab === item.tab;
+              : item.id === "study"
+                ? studyActive
+                : item.id === "resources"
+                  ? resourcesActive
+                  : item.id === "calendar"
+                    ? calendarActive
+                    : item.id === "hub"
+                      ? onDashboard && urlTab === "hub"
+                      : onDashboard && "tab" in item && urlTab === item.tab;
 
           return (
             <Link
@@ -106,7 +116,7 @@ export function BottomNav({
                 if (item.id === "hub") onChange("hub");
                 else if ("tab" in item) onChange(item.tab);
               }}
-              className={`flex min-w-[4rem] flex-1 flex-col items-center gap-0.5 rounded-full px-1 py-2 transition touch-manipulation ${
+              className={`flex min-h-11 min-w-[4.25rem] flex-1 flex-col items-center justify-center gap-0.5 rounded-full px-1 py-2 transition touch-manipulation ${
                 isActive ? "nav-pill-active" : "text-stone-500 hover:text-stone-800"
               }`}
             >

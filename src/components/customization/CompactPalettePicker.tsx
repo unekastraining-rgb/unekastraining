@@ -15,14 +15,16 @@ import { useThemeOptional } from "@/lib/theme/ThemeProvider";
 
 export function CompactPalettePicker({
   onSelectPalette,
-  applyGlobally = true,
+  applyGlobally = false,
   label = "Built-in palettes",
   showImageImport = false,
+  touchFriendly = false,
 }: {
   onSelectPalette?: (colors: string[]) => void;
   applyGlobally?: boolean;
   label?: string;
   showImageImport?: boolean;
+  touchFriendly?: boolean;
 }) {
   const customization = useCustomizationOptional();
   const theme = useThemeOptional();
@@ -34,12 +36,15 @@ export function CompactPalettePicker({
     () => BUILTIN_PALETTES.filter((palette) => palette.categoryId === categoryId),
     [categoryId],
   );
+  const touchChip = touchFriendly ? " min-h-11 touch-manipulation" : "";
 
   async function handleSelect(colors: string[]) {
     onSelectPalette?.(colors);
+    // Local picks (ink, calendar accent, etc.) must not retheme the whole app.
+    if (!applyGlobally) return;
     if (theme) {
       await theme.updateSettings(paletteToThemePatch(colors));
-    } else if (applyGlobally) {
+    } else {
       await applyStudyHaulPaletteGlobally(colors);
     }
   }
@@ -62,7 +67,7 @@ export function CompactPalettePicker({
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center justify-between rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1.5 text-left text-[10px] font-semibold text-stone-600 hover:bg-stone-100"
+        className={`flex w-full items-center justify-between rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1.5 text-left text-[10px] font-semibold text-stone-600 hover:bg-stone-100${touchChip}`}
       >
         {label}
         <span className="text-stone-400">{open ? "−" : "+"}</span>
@@ -70,7 +75,7 @@ export function CompactPalettePicker({
       {open ? (
         <div className="mt-2 space-y-2 rounded-xl border border-stone-100 bg-stone-50/80 p-2">
           {showImageImport ? (
-            <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-stone-300 bg-white px-2.5 py-2 text-[10px] font-semibold text-stone-600 hover:bg-stone-50">
+            <label className={`flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-stone-300 bg-white px-2.5 py-2 text-[10px] font-semibold text-stone-600 hover:bg-stone-50${touchChip}`}>
               <ImagePlus className="h-3.5 w-3.5 text-orange-500" />
               {importing ? "Extracting colors…" : "Import palette from image"}
               <input
@@ -92,7 +97,7 @@ export function CompactPalettePicker({
                 key={category.id}
                 type="button"
                 onClick={() => setCategoryId(category.id)}
-                className={`rounded-md px-2 py-0.5 text-[9px] font-semibold ${
+                className={`rounded-md px-2 py-0.5 text-[9px] font-semibold${touchChip} ${
                   categoryId === category.id
                     ? "bg-stone-900 text-white"
                     : "bg-white text-stone-600 ring-1 ring-stone-200"
@@ -112,6 +117,7 @@ export function CompactPalettePicker({
                   ? (id) => void customization.toggleFavoritePalette(id)
                   : undefined
               }
+              touchFriendly={touchFriendly}
             />
           </div>
           {customization && customization.state.userPalettes.length > 0 ? (
@@ -123,6 +129,7 @@ export function CompactPalettePicker({
                 <PaletteCardGrid
                   palettes={customization.state.userPalettes}
                   onSelectPalette={(colors) => void handleSelect(colors)}
+                  touchFriendly={touchFriendly}
                 />
               </div>
             </div>

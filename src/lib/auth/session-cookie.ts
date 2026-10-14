@@ -8,7 +8,13 @@ export function resolveSessionCookieSecure(
   forwardedProto?: string | null,
   requestUrl?: string,
 ): boolean {
-  if (process.env.SESSION_COOKIE_SECURE === "false") return false;
+  // Private/beta: never honor insecure cookie override in production.
+  if (
+    process.env.SESSION_COOKIE_SECURE === "false" &&
+    process.env.NODE_ENV !== "production"
+  ) {
+    return false;
+  }
   if (process.env.NODE_ENV !== "production") return false;
   if (forwardedProto) {
     return forwardedProto.split(",")[0]?.trim() === "https";

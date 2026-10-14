@@ -20,6 +20,44 @@ export function isLmsSyncStale(connections: LmsConnectionStatus[]): boolean {
   );
 }
 
+function shouldDebounceSync(): boolean {
+  if (typeof sessionStorage === "undefined") return false;
+  const lastAttempt = sessionStorage.getItem(SYNC_LOCK_KEY);
+  if (lastAttempt && Date.now() - Number(lastAttempt) < SYNC_DEBOUNCE_MS) {
+    return true;
+  }
+  sessionStorage.setItem(SYNC_LOCK_KEY, String(Date.now()));
+  return false;
+}
+
+async function syncMoodleFromThisDevice(): Promise<boolean> {
+  try {
+    const { syncMoodleFromBrowser } = await import("@/lib/lms/moodle-browser-sync");
+    const credResponse = await fetch("/api/lms/moodle/credentials");
+    const credData = await credResponse.json();
+    if (!credData.success) return false;
+    await syncMoodleFromBrowser(credData.baseUrl, credData.accessToken);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function syncProviderFromServer(provider: string): Promise<boolean> {
+  try {
+    const response = await fetch("/api/lms/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider }),
+      signal: AbortSignal.timeout(25_000),
+    });
+    const data = await response.json();
+    return Boolean(data.success);
+  } catch {
+    return false;
+  }
+}
+
 export async function triggerLmsSyncIfStale(
   connections: LmsConnectionStatus[],
 ): Promise<boolean> {
@@ -28,29 +66,28 @@ export async function triggerLmsSyncIfStale(
       connection.status === "connected" && isConnectionStale(connection),
   );
   if (stale.length === 0) return false;
-
-  if (typeof sessionStorage !== "undefined") {
-    const lastAttempt = sessionStorage.getItem(SYNC_LOCK_KEY);
-    if (lastAttempt && Date.now() - Number(lastAttempt) < SYNC_DEBOUNCE_MS) {
-      return false;
-    }
-    sessionStorage.setItem(SYNC_LOCK_KEY, String(Date.now()));
-  }
+  if (shouldDebounceSync()) return false;
 
   let synced = false;
   for (const connection of stale) {
-    try {
-      const response = await fetch("/api/lms/sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider: connection.provider }),
-      });
-      const data = await response.json();
-      if (data.success) synced = true;
-    } catch {
-      // Try remaining providers.
+    if (connection.provider === "MOODLE") {
+      if (await syncMoodleFromThisDevice()) synced = true;
+    } else if (await syncProviderFromServer(connection.provider)) {
+      synced = true;
     }
   }
 
   return synced;
+}
+
+/** Load connections and sync stale LMS data (same account on web, iPad, and phone). */
+export async function triggerLmsBackgroundSync(): Promise<boolean> {
+  try {
+    const response = await fetch("/api/lms/connect", { credentials: "same-origin" });
+    const data = await response.json();
+    if (!data.success) return false;
+    return triggerLmsSyncIfStale(data.connections ?? []);
+  } catch {
+    return false;
+  }
 }

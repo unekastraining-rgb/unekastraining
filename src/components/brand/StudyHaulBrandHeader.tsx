@@ -10,8 +10,10 @@ const BOOKS = [
 
 export function HorizontalLeaningBooks({
   className = "",
+  shadowId = "study-haul-books-shadow",
 }: {
   className?: string;
+  shadowId?: string;
 }) {
   const last = BOOKS[BOOKS.length - 1]!;
 
@@ -19,10 +21,11 @@ export function HorizontalLeaningBooks({
     <svg
       viewBox="0 0 92 78"
       aria-hidden
+      suppressHydrationWarning
       className={`h-[0.46em] w-auto shrink-0 ${className}`}
     >
       <defs>
-        <filter id="book-shadow" x="-20%" y="-20%" width="140%" height="140%">
+        <filter id={shadowId} x="-20%" y="-20%" width="140%" height="140%">
           <feDropShadow dx="0" dy="2" stdDeviation="1.5" floodOpacity="0.18" />
         </filter>
       </defs>
@@ -31,7 +34,7 @@ export function HorizontalLeaningBooks({
         <g
           key={index}
           transform={`translate(${book.x + book.w / 2}, ${62 - book.h}) rotate(${book.rotate})`}
-          filter="url(#book-shadow)"
+          filter={`url(#${shadowId})`}
         >
           <rect
             x={-book.w / 2}
@@ -114,20 +117,14 @@ export function StudyHaulBrandHeader({
 
   return (
     <div
-      className={`leading-none ${
+      suppressHydrationWarning
+      className={`study-haul-brand ${
         isCompact
-          ? "w-full max-w-full text-center"
+          ? "study-haul-brand--compact"
           : isToolbar
-            ? "w-fit shrink-0"
-            : "w-fit max-w-full"
+            ? "study-haul-brand--toolbar"
+            : "study-haul-brand--hero"
       }`}
-      style={{
-        fontSize: isToolbar
-          ? "clamp(1.35rem, 2.2vw, 1.85rem)"
-          : isCompact
-            ? "clamp(2.5rem, 11vw, 4.5rem)"
-            : "clamp(2.25rem, 7vw, 8.5rem)",
-      }}
     >
       <div
         className={`flex max-w-full flex-wrap items-end gap-x-1 ${
@@ -135,6 +132,7 @@ export function StudyHaulBrandHeader({
         }`}
       >
         <h1
+          suppressHydrationWarning
           className="flex min-w-0 items-end font-black tracking-tight text-stone-900"
           style={{ fontSize: "inherit" }}
         >
@@ -143,25 +141,21 @@ export function StudyHaulBrandHeader({
             Haul
             <span
               aria-hidden
-              className="absolute -bottom-[0.04em] left-0 right-0 h-[0.04em] rounded-full"
-              style={{
-                background:
-                  "linear-gradient(to right, color-mix(in srgb, var(--sh-primary, #fb923c) 80%, transparent), color-mix(in srgb, var(--sh-primary, #fb923c) 60%, transparent), transparent)",
-              }}
+              className="study-haul-brand-underline absolute -bottom-[0.04em] left-0 right-0 h-[0.04em] rounded-full"
             />
           </span>
         </h1>
 
         <HorizontalLeaningBooks
+          shadowId={`study-haul-books-shadow-${variant}`}
           className={`mb-[0.03em] ${isCompact ? "scale-90" : isToolbar ? "scale-[0.55]" : "max-sm:scale-90"}`}
         />
       </div>
 
       {!isToolbar ? (
         <p
-          className={`mt-[0.12em] text-[0.115em] font-medium tracking-wide text-muted-soft ${
-            isCompact ? "" : "pl-[0.08em]"
-          }`}
+          suppressHydrationWarning
+          className={`study-haul-brand-tagline ${isCompact ? "" : "study-haul-brand-tagline--hero"}`}
         >
           (Nadia&apos;s Nerd)
         </p>

@@ -7,9 +7,11 @@ import type { ProblemSolutionEntry } from "@/lib/core/note-types";
 export function ProblemSolutionEditor({
   items,
   onChange,
+  bare = false,
 }: {
   items: ProblemSolutionEntry[];
   onChange: (items: ProblemSolutionEntry[]) => void;
+  bare?: boolean;
 }) {
   const update = (index: number, field: keyof ProblemSolutionEntry, value: string) => {
     onChange(items.map((item, i) => (i === index ? { ...item, [field]: value } : item)));
@@ -23,6 +25,54 @@ export function ProblemSolutionEditor({
     if (items.length <= 1) return;
     onChange(items.filter((_, i) => i !== index));
   };
+
+  if (bare) {
+    return (
+      <div className="space-y-2 px-0.5 py-0.5">
+        {items.map((item, index) => (
+          <div key={index} className="group relative space-y-0.5">
+            <textarea
+              value={item.problem}
+              onChange={(event) => update(index, "problem", event.target.value)}
+              placeholder="Problem"
+              rows={1}
+              className="w-full resize-none bg-transparent text-sm font-semibold text-stone-900 outline-none placeholder:text-stone-300"
+            />
+            <textarea
+              value={item.approach}
+              onChange={(event) => update(index, "approach", event.target.value)}
+              placeholder="Approach"
+              rows={1}
+              className="w-full resize-none bg-transparent text-sm text-stone-700 outline-none placeholder:text-stone-300"
+            />
+            <textarea
+              value={item.solution}
+              onChange={(event) => update(index, "solution", event.target.value)}
+              placeholder="Solution"
+              rows={2}
+              className="w-full resize-none bg-transparent text-sm leading-relaxed text-stone-700 outline-none placeholder:text-stone-300"
+            />
+            {items.length > 1 ? (
+              <button
+                type="button"
+                onClick={() => removeItem(index)}
+                className="absolute -right-1 top-0 hidden rounded p-0.5 text-stone-300 hover:text-rose-500 group-hover:block"
+              >
+                <Trash2 className="h-3 w-3" />
+              </button>
+            ) : null}
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={addItem}
+          className="inline-flex items-center gap-1 text-[10px] font-semibold text-stone-400 hover:text-teal-700"
+        >
+          <Plus className="h-3 w-3" /> Add problem
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4 p-4">

@@ -32,7 +32,7 @@ export async function fetchHubTodayCalendarEvents(
         OR: [{ endAt: { gte: rangeStart } }, { endAt: null }],
       },
       include: {
-        course: { select: { id: true, title: true, color: true } },
+        course: { select: { id: true, title: true, code: true, color: true } },
       },
       orderBy: { startAt: "asc" },
     }),
@@ -45,14 +45,14 @@ export async function fetchHubTodayCalendarEvents(
         ],
       },
       include: {
-        course: { select: { id: true, title: true, color: true } },
+        course: { select: { id: true, title: true, code: true, color: true } },
         calendarEvent: { select: { id: true } },
       },
     }),
     db.classMeeting.findMany({
       where: { course: { userId } },
       include: {
-        course: { select: { id: true, title: true, color: true } },
+        course: { select: { id: true, title: true, code: true, color: true } },
       },
     }),
   ]);
@@ -69,5 +69,5 @@ export async function fetchHubTodayCalendarEvents(
     workspaceItemsToHubEvents(items),
     "today",
     referenceDate,
-  );
+  ).filter((event) => !event.completed);
 }

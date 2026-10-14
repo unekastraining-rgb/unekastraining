@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { CourseEventBlock } from "@/components/calendar/CourseEventBlock";
 import { useCalendarAppearance } from "@/components/calendar/CalendarAppearanceContext";
 import { ResizableTimedEvent } from "@/components/calendar/views/ResizableTimedEvent";
 import {
@@ -10,7 +9,7 @@ import {
   formatHourLabel,
   startOfWeek,
 } from "@/lib/calendar/date-utils";
-import { minutesFromGridOffset } from "@/lib/calendar/drag-utils";
+import { snapMinutes } from "@/lib/calendar/drag-utils";
 import { localDateKey } from "@/lib/calendar/types";
 import { parseTimeToMinutes } from "@/lib/calendar/types";
 import type { WorkspaceCalendarItem } from "@/lib/calendar/workspace-types";
@@ -18,6 +17,173 @@ import type { WorkspaceCalendarItem } from "@/lib/calendar/workspace-types";
 const HOUR_START = 7;
 const HOUR_END = 22;
 const HOUR_HEIGHT = 52;
+/** One readable line per stacked item when several share a start hour. */
+const STACK_ROW_HEIGHT = 40;
+/** Length drawn for a timed item that has a start but no end (e.g. a due time). */
+const OPEN_ENDED_DURATION_MS = 30 * 60 * 1000;
+/** Solo all-day chips stay short; stacks expand the hour instead. */
+const ALL_DAY_CHIP_MINUTES = 45;
+
+export type TimedLayoutRange = {
+  id: string;
+  start: number;
+  end: number;
+  allDay: boolean;
+};
+
+/**
+ * Stack concurrent items vertically (one per line). The start hour expands to fit.
+ */
+export function assignHourStacks(
+  ranges: TimedLayoutRange[],
+): Map<string, { stackIndex: number; stackCount: number; startHour: number }> {
+  const byHour = new Map<number, TimedLayoutRange[]>();
+  for (const range of ranges) {
+    const startHour = Math.floor(range.start / 60);
+    const list = byHour.get(startHour) ?? [];
+    list.push(range);
+    byHour.set(startHour, list);
+  }
+
+  const result = new Map<
+    string,
+    { stackIndex: number; stackCount: number; startHour: number }
+  >();
+
+  for (const [startHour, list] of byHour) {
+    const sorted = [...list].sort(
+      (a, b) => a.start - b.start || a.id.localeCompare(b.id),
+    );
+    const stackCount = sorted.length;
+    sorted.forEach((range, stackIndex) => {
+      result.set(range.id, { stackIndex, stackCount, startHour });
+    });
+  }
+  return result;
+}
+
+/** True all-day / full-day spans — shown as a chip, not a separate all-day row. */
+export function isAllDayLike(item: WorkspaceCalendarItem): boolean {
+  if (item.allDay) return true;
+  const start = new Date(item.startAt);
+  const end = item.endAt
+    ? new Date(item.endAt)
+    : new Date(start.getTime() + OPEN_ENDED_DURATION_MS);
+  const durationMs = end.getTime() - start.getTime();
+  if (durationMs >= 18 * 60 * 60 * 1000) return true;
+  if (
+    start.getHours() === 0 &&
+    start.getMinutes() === 0 &&
+    end.getHours() >= 23 &&
+    durationMs >= 12 * 60 * 60 * 1000
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function visibleRangeForItem(
+  item: WorkspaceCalendarItem,
+  gridStartMinutes: number,
+  gridEndMinutes: number,
+): TimedLayoutRange | null {
+  const allDay = isAllDayLike(item);
+  const start = new Date(item.startAt);
+  const end = item.endAt
+    ? new Date(item.endAt)
+    : new Date(start.getTime() + OPEN_ENDED_DURATION_MS);
+
+  let startMinutes = start.getHours() * 60 + start.getMinutes();
+  let endMinutes = end.getHours() * 60 + end.getMinutes();
+
+  if (allDay) {
+    startMinutes = Math.max(startMinutes, gridStartMinutes);
+    if (startMinutes >= gridEndMinutes) {
+      startMinutes = gridStartMinutes;
+    }
+    endMinutes = startMinutes + ALL_DAY_CHIP_MINUTES;
+  }
+
+  const visibleStart = Math.max(startMinutes, gridStartMinutes);
+  const visibleEnd = Math.min(
+    endMinutes <= startMinutes ? endMinutes + 24 * 60 : endMinutes,
+    gridEndMinutes,
+  );
+  if (visibleEnd <= visibleStart) return null;
+  return { id: item.id, start: visibleStart, end: visibleEnd, allDay };
+}
+
+function hourHeightsForGrid(
+  days: Date[],
+  items: WorkspaceCalendarItem[],
+  hours: number[],
+  gridStartMinutes: number,
+  gridEndMinutes: number,
+): number[] {
+  const heights = hours.map(() => HOUR_HEIGHT);
+  for (const date of days) {
+    const key = localDateKey(date);
+    const dayEvents = items.filter(
+      (item) => localDateKey(new Date(item.startAt)) === key,
+    );
+    const ranges = dayEvents
+      .map((item) => visibleRangeForItem(item, gridStartMinutes, gridEndMinutes))
+      .filter((range): range is TimedLayoutRange => Boolean(range));
+    const stacks = assignHourStacks(ranges);
+    const countByHour = new Map<number, number>();
+    for (const layout of stacks.values()) {
+      countByHour.set(
+        layout.startHour,
+        Math.max(countByHour.get(layout.startHour) ?? 0, layout.stackCount),
+      );
+    }
+    for (const [startHour, count] of countByHour) {
+      const idx = startHour - hours[0]!;
+      if (idx < 0 || idx >= heights.length) continue;
+      heights[idx] = Math.max(heights[idx]!, count * STACK_ROW_HEIGHT, HOUR_HEIGHT);
+    }
+  }
+  return heights;
+}
+
+function offsetForMinutes(
+  totalMinutes: number,
+  hourHeights: number[],
+  gridHourStart: number,
+): number {
+  const hour = Math.floor(totalMinutes / 60);
+  const minute = totalMinutes % 60;
+  let top = 0;
+  for (let h = gridHourStart; h < hour; h++) {
+    const idx = h - gridHourStart;
+    top += hourHeights[idx] ?? HOUR_HEIGHT;
+  }
+  const idx = hour - gridHourStart;
+  const hourH = hourHeights[idx] ?? HOUR_HEIGHT;
+  return top + (minute / 60) * hourH;
+}
+
+function minutesFromVariableOffset(
+  offsetY: number,
+  hourHeights: number[],
+  gridHourStart: number,
+  gridHourEnd: number,
+): number {
+  let y = 0;
+  for (let i = 0; i < hourHeights.length; i++) {
+    const hourH = hourHeights[i] ?? HOUR_HEIGHT;
+    if (offsetY <= y + hourH) {
+      const frac = Math.max(0, Math.min(1, (offsetY - y) / hourH));
+      const raw = (gridHourStart + i) * 60 + frac * 60;
+      return Math.max(
+        gridHourStart * 60,
+        Math.min((gridHourEnd + 1) * 60 - 15, snapMinutes(raw)),
+      );
+    }
+    y += hourH;
+  }
+  return (gridHourEnd + 1) * 60 - 15;
+}
 
 interface TimeGridViewProps {
   days: Date[];
@@ -64,26 +230,43 @@ export function TimeGridView({
     return () => observer.disconnect();
   }, [days.length]);
 
+  const safeHourStart = Number.isFinite(hourStart) ? hourStart : HOUR_START;
+  const safeHourEnd = Number.isFinite(hourEnd) ? hourEnd : HOUR_END;
+  const gridHourStart = Math.min(safeHourStart, safeHourEnd);
+  const gridHourEnd = Math.max(safeHourStart, safeHourEnd);
+  const gridStartMinutes = gridHourStart * 60;
+  const gridEndMinutes = (gridHourEnd + 1) * 60;
+
   const hours = useMemo(
-    () => Array.from({ length: hourEnd - hourStart + 1 }, (_, i) => hourStart + i),
-    [hourStart, hourEnd],
+    () =>
+      Array.from(
+        { length: Math.max(1, gridHourEnd - gridHourStart + 1) },
+        (_, i) => gridHourStart + i,
+      ),
+    [gridHourStart, gridHourEnd],
   );
 
-  const allDayByDay = useMemo(() => {
-    const map = new Map<string, WorkspaceCalendarItem[]>();
-    for (const day of days) {
-      const key = localDateKey(day);
-      map.set(
-        key,
-        items.filter(
-          (item) => item.allDay && localDateKey(new Date(item.startAt)) === key,
-        ),
-      );
-    }
-    return map;
-  }, [days, items]);
+  const hourHeights = useMemo(
+    () =>
+      hourHeightsForGrid(
+        days,
+        items,
+        hours,
+        gridStartMinutes,
+        gridEndMinutes,
+      ),
+    [days, items, hours, gridStartMinutes, gridEndMinutes],
+  );
 
-  const timedItems = items.filter((item) => !item.allDay && item.endAt);
+  const totalGridHeight = hourHeights.reduce((sum, h) => sum + h, 0);
+
+  function hourTop(hour: number): number {
+    let top = 0;
+    for (let h = gridHourStart; h < hour; h++) {
+      top += hourHeights[h - gridHourStart] ?? HOUR_HEIGHT;
+    }
+    return top;
+  }
 
   function handleColumnDrop(day: Date, event: React.DragEvent) {
     event.preventDefault();
@@ -96,11 +279,11 @@ export function TimeGridView({
     const column = event.currentTarget as HTMLElement;
     const rect = column.getBoundingClientRect();
     const offsetY = event.clientY - rect.top;
-    const totalMinutes = minutesFromGridOffset(
+    const totalMinutes = minutesFromVariableOffset(
       offsetY,
-      HOUR_HEIGHT,
-      hourStart,
-      hourEnd,
+      hourHeights,
+      gridHourStart,
+      gridHourEnd,
     );
 
     const start = new Date(day);
@@ -110,42 +293,17 @@ export function TimeGridView({
     const oldEnd = item.endAt
       ? new Date(item.endAt)
       : new Date(oldStart.getTime() + 60 * 60 * 1000);
-    const duration = oldEnd.getTime() - oldStart.getTime();
-    const end = new Date(start.getTime() + duration);
+    const duration = isAllDayLike(item)
+      ? ALL_DAY_CHIP_MINUTES * 60 * 1000
+      : oldEnd.getTime() - oldStart.getTime();
+    const end = new Date(start.getTime() + Math.max(duration, 15 * 60 * 1000));
 
     onEventMove(id, start.toISOString(), end.toISOString());
   }
 
-  function handleAllDayDrop(day: Date, event: React.DragEvent) {
-    event.preventDefault();
-    const id = event.dataTransfer.getData("text/calendar-item-id");
-    if (!id) return;
-
-    const item = items.find((i) => i.id === id);
-    if (!item?.editable || !item.allDay) return;
-
-    const oldStart = new Date(item.startAt);
-    const dayDelta = Math.round(
-      (day.getTime() - new Date(oldStart.toDateString()).getTime()) /
-        (24 * 60 * 60 * 1000),
-    );
-
-    const newStart = new Date(oldStart);
-    newStart.setDate(newStart.getDate() + dayDelta);
-
-    let newEnd: string | null = null;
-    if (item.endAt) {
-      const oldEnd = new Date(item.endAt);
-      oldEnd.setDate(oldEnd.getDate() + dayDelta);
-      newEnd = oldEnd.toISOString();
-    }
-
-    onEventMove(id, newStart.toISOString(), newEnd);
-  }
-
   return (
     <div
-      className="overflow-hidden rounded-2xl border shadow-sm transition-all duration-200"
+      className="rounded-2xl border shadow-sm transition-all duration-200"
       style={{
         borderColor: appearance.gridLineColor,
         backgroundColor: appearance.isDark
@@ -153,10 +311,10 @@ export function TimeGridView({
           : "rgba(255,255,255,0.55)",
       }}
     >
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto overflow-y-visible">
         <div style={{ minWidth: days.length > 1 ? 760 : 400 }}>
           <div
-            className="grid border-b"
+            className="sticky top-0 z-[40] grid border-b"
             style={{
               gridTemplateColumns: `4rem repeat(${days.length}, minmax(0, 1fr))`,
               borderColor: appearance.gridLineColor,
@@ -180,74 +338,20 @@ export function TimeGridView({
           </div>
 
           <div
-            className="grid border-b"
-            style={{
-              gridTemplateColumns: `4rem repeat(${days.length}, minmax(0, 1fr))`,
-              borderColor: appearance.gridLineColor,
-            }}
-          >
-            <div
-              className="px-2 py-2 text-[10px] font-bold uppercase"
-              style={{ color: appearance.mutedTextColor }}
-            >
-              All day
-            </div>
-            {days.map((date) => {
-              const key = localDateKey(date);
-              const dayItems = allDayByDay.get(key) ?? [];
-              return (
-                <div
-                  key={key}
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={(e) => handleAllDayDrop(date, e)}
-                  className="min-h-10 space-y-1 border-l p-1"
-                  style={{ borderColor: appearance.gridLineColor }}
-                >
-                  {dayItems.map((item) => {
-                    const dimmed = Boolean(
-                      focusedCourseId && item.courseId !== focusedCourseId,
-                    );
-                    const highlighted = Boolean(
-                      focusedCourseId && item.courseId === focusedCourseId,
-                    );
-                    return (
-                      <CourseEventBlock
-                        key={item.id}
-                        item={item}
-                        selected={selectedId === item.id}
-                        compact
-                        dimmed={dimmed}
-                        highlighted={highlighted}
-                        onClick={() => onSelect(item.id)}
-                        onDragStart={(e) => {
-                          e.dataTransfer.setData("text/calendar-item-id", item.id);
-                        }}
-                        onToggleComplete={
-                          onToggleComplete
-                            ? (completed) => onToggleComplete(item.id, completed)
-                            : undefined
-                        }
-                      />
-                    );
-                  })}
-                </div>
-              );
-            })}
-          </div>
-
-          <div
             className="grid"
             style={{
               gridTemplateColumns: `4rem repeat(${days.length}, minmax(0, 1fr))`,
+              height: totalGridHeight,
             }}
           >
-            <div>
-              {hours.map((hour) => (
+            <div className="relative">
+              {hours.map((hour, index) => (
                 <div
                   key={hour}
-                  className="border-b px-2 text-right text-[10px]"
+                  className="absolute inset-x-0 border-b px-2 text-right text-[10px]"
                   style={{
-                    height: HOUR_HEIGHT,
+                    top: hourTop(hour),
+                    height: hourHeights[index] ?? HOUR_HEIGHT,
                     borderColor: appearance.gridLineColor,
                     color: appearance.mutedTextColor,
                   }}
@@ -259,9 +363,16 @@ export function TimeGridView({
 
             {days.map((date, dayIndex) => {
               const key = localDateKey(date);
-              const dayEvents = timedItems.filter(
+              const dayEvents = items.filter(
                 (item) => localDateKey(new Date(item.startAt)) === key,
               );
+
+              const layoutRanges = dayEvents
+                .map((item) =>
+                  visibleRangeForItem(item, gridStartMinutes, gridEndMinutes),
+                )
+                .filter((range): range is TimedLayoutRange => Boolean(range));
+              const stacksById = assignHourStacks(layoutRanges);
 
               return (
                 <div
@@ -271,19 +382,22 @@ export function TimeGridView({
                   onDrop={(e) => handleColumnDrop(date, e)}
                   className="group/slot relative border-l"
                   style={{
-                    height: (hourEnd - hourStart) * HOUR_HEIGHT,
+                    height: totalGridHeight,
                     borderColor: appearance.gridLineColor,
                   }}
                 >
-                  {hours.map((hour) => (
+                  {hours.map((hour, index) => (
                     <button
                       key={hour}
                       type="button"
-                      onClick={() => onSlotClick(date, hour)}
-                      className="absolute inset-x-0 border-b opacity-0 transition-all duration-200 hover:opacity-100 group-hover/slot:opacity-60"
+                      onClick={(clickEvent) => {
+                        if (clickEvent.target !== clickEvent.currentTarget) return;
+                        onSlotClick(date, hour);
+                      }}
+                      className="absolute inset-x-0 z-0 border-b opacity-0 transition-all duration-200 hover:opacity-100 group-hover/slot:opacity-60"
                       style={{
-                        top: (hour - hourStart) * HOUR_HEIGHT,
-                        height: HOUR_HEIGHT,
+                        top: hourTop(hour),
+                        height: hourHeights[index] ?? HOUR_HEIGHT,
                         borderColor: appearance.gridLineColor,
                         backgroundColor: appearance.isDark
                           ? "rgba(255,255,255,0.04)"
@@ -294,14 +408,39 @@ export function TimeGridView({
                   ))}
 
                   {dayEvents.map((item) => {
-                    const start = new Date(item.startAt);
-                    const end = new Date(item.endAt!);
-                    const top =
-                      ((start.getHours() * 60 + start.getMinutes() - hourStart * 60) /
-                        60) *
-                      HOUR_HEIGHT;
-                    const height =
-                      ((end.getTime() - start.getTime()) / (60 * 60 * 1000)) * HOUR_HEIGHT;
+                    const range = visibleRangeForItem(
+                      item,
+                      gridStartMinutes,
+                      gridEndMinutes,
+                    );
+                    if (!range) return null;
+
+                    const stack = stacksById.get(item.id) ?? {
+                      stackIndex: 0,
+                      stackCount: 1,
+                      startHour: Math.floor(range.start / 60),
+                    };
+
+                    const stacked = stack.stackCount > 1;
+                    const hourStartTop = hourTop(stack.startHour);
+                    const top = stacked
+                      ? hourStartTop + stack.stackIndex * STACK_ROW_HEIGHT
+                      : offsetForMinutes(
+                          range.start,
+                          hourHeights,
+                          gridHourStart,
+                        );
+                    const height = stacked
+                      ? STACK_ROW_HEIGHT - 4
+                      : Math.max(
+                          28,
+                          offsetForMinutes(range.end, hourHeights, gridHourStart) -
+                            offsetForMinutes(
+                              range.start,
+                              hourHeights,
+                              gridHourStart,
+                            ),
+                        );
 
                     const dimmed = Boolean(
                       focusedCourseId && item.courseId !== focusedCourseId,
@@ -313,9 +452,9 @@ export function TimeGridView({
                     return (
                       <ResizableTimedEvent
                         key={item.id}
-                        item={item}
-                        top={Math.max(0, top)}
-                        height={Math.max(28, height)}
+                        item={range.allDay ? { ...item, allDay: true } : item}
+                        top={top}
+                        height={height}
                         hourHeight={HOUR_HEIGHT}
                         dayWidth={dayWidth}
                         selected={selectedId === item.id}
@@ -350,4 +489,4 @@ export function buildWeekDays(anchor: Date, weekStartsOnMonday = true): Date[] {
   return Array.from({ length: 7 }, (_, i) => addDays(start, i));
 }
 
-export { HOUR_START, HOUR_END, parseTimeToMinutes };
+export { HOUR_START, HOUR_END, parseTimeToMinutes, STACK_ROW_HEIGHT };

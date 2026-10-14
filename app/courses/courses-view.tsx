@@ -1,15 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Trash2 } from "lucide-react";
 
-import { confirmDelete } from "@/lib/confirm-delete";
-import { coreCourseHref } from "@/lib/study/client-launch";
+import { confirmDelete, confirmDeleteMany } from "@/lib/confirm-delete";
+import { useSelectableIds } from "@/lib/selection/use-selectable-ids";
+import { coreStudyPackHref } from "@/lib/study/loop-hrefs";
 
 import { AiCourseBuilder } from "@/components/courses/AiCourseBuilder";
 import { GradeSchoolGate } from "@/components/grade-school/GradeSchoolGate";
+import { BulkSelectionBar } from "@/components/ui/BulkSelectionBar";
+import { SelectCheckbox } from "@/components/ui/SelectCheckbox";
 import { coursePath } from "@/lib/courses";
 import { useTheme } from "@/lib/theme/ThemeProvider";
 import type {
@@ -33,6 +36,8 @@ interface CourseSummary {
 
 interface CoursesViewProps {
   initialCourses: CourseSummary[];
+  /** Scroll to syllabus upload (from Study → Photo syllabus). */
+  highlightUpload?: boolean;
 }
 
 function formatDate(value: string | null) {
@@ -52,7 +57,10 @@ function formatDate(value: string | null) {
   });
 }
 
-export function CoursesView({ initialCourses }: CoursesViewProps) {
+export function CoursesView({
+  initialCourses,
+  highlightUpload = false,
+}: CoursesViewProps) {
   const router = useRouter();
   const { settings } = useTheme();
   const gradeSchoolMode = settings.elementaryMode;
@@ -70,6 +78,20 @@ export function CoursesView({ initialCourses }: CoursesViewProps) {
   const [parserMode, setParserMode] = useState<SyllabusIngestResult["parser"] | null>(null);
   const [manualTitle, setManualTitle] = useState("");
   const [creatingClass, setCreatingClass] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+
+  const courseIds = useMemo(() => courses.map((c) => c.id), [courses]);
+  const selection = useSelectableIds(courseIds);
+
+  useEffect(() => {
+    selection.pruneTo(courseIds);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- prune when list identity changes
+  }, [courseIds.join("|")]);
+
+  useEffect(() => {
+    if (!highlightUpload) return;
+    document.getElementById("syllabus-upload")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [highlightUpload]);
 
   const visibleMode = gradeSchoolMode ? addMode : "upload";
 
@@ -92,6 +114,40 @@ export function CoursesView({ initialCourses }: CoursesViewProps) {
       await refreshCourses();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete course.");
+    }
+  }
+
+  async function deleteSelectedCourses() {
+    const ids = selection.selectedIds;
+    if (ids.length === 0) return;
+    if (
+      !confirmDeleteMany(ids.length, {
+        noun: "course",
+        nounPlural: "courses",
+        detail: "including related assignments and schedules",
+      })
+    ) {
+      return;
+    }
+
+    setBulkDeleting(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/courses", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error ?? "Failed to delete courses.");
+      }
+      selection.clear();
+      await refreshCourses();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete courses.");
+    } finally {
+      setBulkDeleting(false);
     }
   }
 
@@ -209,13 +265,9 @@ export function CoursesView({ initialCourses }: CoursesViewProps) {
       await refreshCourses();
 
       if (savedCourse.id) {
-        router.push(
-          coreCourseHref({
-            courseId: savedCourse.id,
-            materialId,
-            autoSession: true,
-          }),
-        );
+        const href = new URL(coreStudyPackHref(savedCourse.id), "http://local");
+        if (materialId) href.searchParams.set("materialId", materialId);
+        router.push(`${href.pathname}${href.search}`);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save course.");
@@ -298,6 +350,7 @@ export function CoursesView({ initialCourses }: CoursesViewProps) {
       {visibleMode === "upload" ? (
       <section className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
         <div
+          id="syllabus-upload"
           onDragEnter={() => setDragActive(true)}
           onDragLeave={() => setDragActive(false)}
           onDragOver={(event) => event.preventDefault()}
@@ -328,14 +381,15 @@ export function CoursesView({ initialCourses }: CoursesViewProps) {
             <div>
               <h2 className="text-lg font-medium">Upload syllabus</h2>
               <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-                PDF or DOCX — parsed locally; images need AI for OCR
+                PDF, DOCX, or tap to photograph a syllabus (Gemini/OpenRouter OCR)
               </p>
             </div>
-            <label className="cursor-pointer rounded-full bg-orange-500 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-orange-600">
-              {uploading ? "Processing..." : "Choose file"}
+            <label className="cursor-pointer touch-manipulation rounded-full bg-orange-500 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-orange-600">
+              {uploading ? "Processing..." : "Choose file or photo"}
               <input
                 type="file"
                 accept=".pdf,.docx,image/*"
+                capture="environment"
                 className="hidden"
                 disabled={uploading}
                 onChange={(event) => {
@@ -512,16 +566,40 @@ export function CoursesView({ initialCourses }: CoursesViewProps) {
             No courses yet. Upload a syllabus to create your first course.
           </div>
         ) : (
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <div className="space-y-4">
+            <BulkSelectionBar
+              totalCount={courses.length}
+              selectedCount={selection.selectedCount}
+              allSelected={selection.allSelected}
+              someSelected={selection.someSelected}
+              onToggleAll={selection.toggleAll}
+              onClear={selection.clear}
+              onDeleteSelected={() => void deleteSelectedCourses()}
+              deleting={bulkDeleting}
+              noun="course"
+            />
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {courses.map((course) => (
               <article
                 key={course.id}
-                className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
+                className={`rounded-2xl border bg-white p-5 shadow-sm dark:bg-zinc-950 ${
+                  selection.isSelected(course.id)
+                    ? "border-orange-400 ring-1 ring-orange-200 dark:border-orange-500"
+                    : "border-zinc-200 dark:border-zinc-800"
+                }`}
               >
-                <div
-                  className="mb-4 h-1.5 w-12 rounded-full"
-                  style={{ backgroundColor: course.color ?? "#ea580c" }}
-                />
+                <div className="mb-3 flex items-start justify-between gap-2">
+                  <SelectCheckbox
+                    checked={selection.isSelected(course.id)}
+                    onChange={() => selection.toggle(course.id)}
+                    label={`Select ${course.title}`}
+                    className="-ml-2"
+                  />
+                  <div
+                    className="h-1.5 w-12 rounded-full"
+                    style={{ backgroundColor: course.color ?? "#ea580c" }}
+                  />
+                </div>
                 <h3 className="text-lg font-medium">
                   <Link href={coursePath(course.id)} className="hover:text-orange-600">
                     {course.title}
@@ -556,6 +634,7 @@ export function CoursesView({ initialCourses }: CoursesViewProps) {
                 </div>
               </article>
             ))}
+            </div>
           </div>
         )}
       </section>

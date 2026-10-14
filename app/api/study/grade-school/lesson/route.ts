@@ -5,12 +5,14 @@ import { db } from "@/lib/db";
 import { generateInteractiveLesson } from "@/lib/grade-school/generate-lesson";
 import { parseCurriculumFromMaterial } from "@/lib/grade-school/learning-plan";
 import { requireGradeSchoolMode } from "@/lib/grade-school";
+import { getUserAppSettings } from "@/lib/settings/app-settings";
 import { getOrCreateDefaultUser } from "@/lib/user";
 
 export async function POST(request: Request) {
   try {
     await requireGradeSchoolMode();
     const user = await getOrCreateDefaultUser();
+    const appSettings = await getUserAppSettings(user.id);
     const body = await request.json();
     const courseId = typeof body.courseId === "string" ? body.courseId : "";
     const stepIndex = Number(body.stepIndex ?? 0);
@@ -66,6 +68,7 @@ export async function POST(request: Request) {
       learningStep,
       courseSummary: curriculum.summary ?? course.description,
       learnerSummary: curriculum.learnerSummary,
+      includeOpenAIPro: appSettings.aiUseOpenAIPro,
     });
 
     return NextResponse.json({ success: true, lesson });

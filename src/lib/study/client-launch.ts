@@ -3,10 +3,12 @@
 import { saveStudySession } from "@/components/study/StudySessionRunner";
 import type { StudyMinutes } from "@/lib/csl/study-now";
 
+export { coreCourseHref } from "@/lib/study/core-href";
+
 export async function launchStudyNowSession(options?: {
   minutes?: StudyMinutes;
   courseId?: string;
-}): Promise<void> {
+}): Promise<{ courseId: string | null; courseTitle: string | null }> {
   const minutes = options?.minutes ?? 20;
   const response = await fetch("/api/study-now", {
     method: "POST",
@@ -21,24 +23,18 @@ export async function launchStudyNowSession(options?: {
     throw new Error(data.error ?? "Failed to build session");
   }
 
+  const resolvedCourseId = data.data.courseId ?? options?.courseId ?? null;
+  const resolvedCourseTitle =
+    typeof data.data.courseTitle === "string" ? data.data.courseTitle : null;
+
   saveStudySession({
     summary: data.data.summary,
     totalMinutes: data.data.totalMinutes,
     blocks: data.data.blocks,
     context: data.data.context,
+    courseId: resolvedCourseId,
+    courseTitle: resolvedCourseTitle,
   });
-}
 
-export function coreCourseHref(options: {
-  courseId: string;
-  materialId?: string | null;
-  noteId?: string | null;
-  autoSession?: boolean;
-}): string {
-  const params = new URLSearchParams();
-  params.set("courseId", options.courseId);
-  if (options.noteId) params.set("noteId", options.noteId);
-  else if (options.materialId) params.set("materialId", options.materialId);
-  if (options.autoSession) params.set("session", "20");
-  return `/core?${params.toString()}`;
+  return { courseId: resolvedCourseId, courseTitle: resolvedCourseTitle };
 }

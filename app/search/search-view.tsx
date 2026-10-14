@@ -42,10 +42,12 @@ export function SearchView() {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync UI state to props or external subscription
     setQuery(initialQuery);
   }, [initialQuery]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync UI state to props or external subscription
     setActiveIndex(-1);
     const trimmed = query.trim();
     if (trimmed.length < 2) {
@@ -110,7 +112,9 @@ export function SearchView() {
       </div>
 
       {query.trim().length < 2 ? (
-        <p className="text-sm text-stone-500">Type at least 2 characters to search.</p>
+        <p className="text-sm text-stone-500">
+          Type at least 2 characters to search classes, notes, and materials.
+        </p>
       ) : loading ? (
         <p className="text-sm text-stone-500">Searching…</p>
       ) : results.length === 0 ? (

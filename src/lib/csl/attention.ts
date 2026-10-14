@@ -1,5 +1,6 @@
 import { buildSixHrefForTopic } from "./six-recommendations";
 import { hubAssignmentFocusHref } from "@/lib/hub/tabs";
+import { withCourseContext } from "@/lib/study/loop-hrefs";
 
 function teachMeHref(courseId: string, topicName: string) {
   return `/study/teach-me?courseId=${encodeURIComponent(courseId)}&topic=${encodeURIComponent(topicName)}`;
@@ -16,6 +17,30 @@ export interface AttentionItem {
   description: string;
   href: string;
   category: AttentionCategory;
+  /** When set, hub surfaces can show Core → Six → Lucky chips beside this item. */
+  loopCourseId?: string | null;
+  loopTopic?: string | null;
+}
+
+export interface AttentionInput {
+  overdueAssignments: Array<{
+    id: string;
+    title: string;
+    courseId: string;
+    courseTitle: string;
+  }>;
+  dueSoonAssignments: Array<{
+    id: string;
+    title: string;
+    courseId: string;
+    courseTitle: string;
+    dueDate: Date;
+  }>;
+  weakTopics: AttentionWeakTopic[];
+  missedQuestions: number;
+  dueFlashcards: number;
+  /** Keeps Lucky / flashcard attention items on the Core → Six → Lucky loop. */
+  primaryCourseId?: string | null;
 }
 
 export interface AttentionWeakTopic {
@@ -30,16 +55,12 @@ export interface AttentionWeakTopic {
   reviewCount: number;
 }
 
-export interface AttentionInput {
-  overdueAssignments: Array<{ id: string; title: string; courseTitle: string }>;
-  dueSoonAssignments: Array<{ id: string; title: string; courseTitle: string; dueDate: Date }>;
-  weakTopics: AttentionWeakTopic[];
-  missedQuestions: number;
-  dueFlashcards: number;
-}
-
 export function buildAttentionItems(input: AttentionInput): AttentionItem[] {
   const items: AttentionItem[] = [];
+  const loopCourseId =
+    input.primaryCourseId?.trim() ||
+    input.weakTopics[0]?.courseId?.trim() ||
+    null;
 
   for (const assignment of input.overdueAssignments.slice(0, 3)) {
     items.push({
@@ -49,6 +70,8 @@ export function buildAttentionItems(input: AttentionInput): AttentionItem[] {
       description: `${assignment.courseTitle} — overdue`,
       href: hubAssignmentFocusHref(assignment.id),
       category: "deadline",
+      loopCourseId: assignment.courseId,
+      loopTopic: assignment.title.trim() || null,
     });
   }
 
@@ -60,6 +83,8 @@ export function buildAttentionItems(input: AttentionInput): AttentionItem[] {
       description: `${assignment.courseTitle} — due ${assignment.dueDate.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}`,
       href: hubAssignmentFocusHref(assignment.id),
       category: "deadline",
+      loopCourseId: assignment.courseId,
+      loopTopic: assignment.title.trim() || null,
     });
   }
 
@@ -83,6 +108,8 @@ export function buildAttentionItems(input: AttentionInput): AttentionItem[] {
               reviewCount: topic.reviewCount,
             }),
       category: "mastery",
+      loopCourseId: topic.courseId,
+      loopTopic: topic.name,
     });
   }
 
@@ -92,8 +119,10 @@ export function buildAttentionItems(input: AttentionInput): AttentionItem[] {
       severity: input.missedQuestions >= 5 ? "high" : "medium",
       title: `${input.missedQuestions} missed question${input.missedQuestions === 1 ? "" : "s"}`,
       description: "Recycle missed quiz items before they pile up.",
-      href: "/quizzes?filter=missed",
+      href: withCourseContext("/quizzes?filter=missed", loopCourseId),
       category: "review",
+      loopCourseId,
+      loopTopic: input.weakTopics[0]?.name ?? null,
     });
   }
 
@@ -103,8 +132,10 @@ export function buildAttentionItems(input: AttentionInput): AttentionItem[] {
       severity: input.dueFlashcards >= 20 ? "medium" : "low",
       title: `${input.dueFlashcards} flashcard${input.dueFlashcards === 1 ? "" : "s"} due`,
       description: "Spaced review keeps retention strong.",
-      href: "/flashcards",
+      href: withCourseContext("/flashcards", loopCourseId),
       category: "retention",
+      loopCourseId,
+      loopTopic: input.weakTopics[0]?.name ?? null,
     });
   }
 

@@ -16,7 +16,7 @@ function wrapBrowserNetworkError(error: unknown): Error {
 export async function syncMoodleFromBrowser(
   baseUrl: string,
   token: string,
-): Promise<{ message: string }> {
+): Promise<{ message: string; coldStartCourses?: Array<{ id: string; title: string; focusTopic: string | null }> }> {
   const root = normalizeMoodleBaseUrl(baseUrl);
   let courses;
   try {
@@ -34,5 +34,8 @@ export async function syncMoodleFromBrowser(
   if (!data.success) {
     throw new Error(data.error ?? "Import failed.");
   }
-  return { message: data.result?.message ?? "Moodle sync complete." };
+  return {
+    message: data.result?.message ?? "Moodle sync complete.",
+    coldStartCourses: data.result?.coldStartCourses,
+  };
 }

@@ -1,4 +1,5 @@
 import type { LuckyActivity } from "./lucky";
+import { withColdStartTopic, withCourseContext } from "@/lib/study/loop-hrefs";
 
 export interface MixedReviewStep {
   id: string;
@@ -9,14 +10,25 @@ export interface MixedReviewStep {
   minutes: number;
 }
 
-export function buildMixedReviewPlan(context: {
+export interface MixedReviewContext {
   missedQuestions: number;
   dueFlashcards: number;
   weakTopics: number;
   lowUnderstanding: number;
-}): MixedReviewStep[] {
+  /** Primary course for cold-start loop links */
+  courseId?: string | null;
+  focusTopic?: string | null;
+}
+
+function loopHref(href: string, courseId?: string | null, focusTopic?: string | null): string {
+  const withCourse = withCourseContext(href, courseId);
+  return withColdStartTopic(withCourse, focusTopic);
+}
+
+export function buildMixedReviewPlan(context: MixedReviewContext): MixedReviewStep[] {
   const steps: MixedReviewStep[] = [];
-  const { missedQuestions, dueFlashcards, weakTopics, lowUnderstanding } = context;
+  const { missedQuestions, dueFlashcards, weakTopics, lowUnderstanding, courseId, focusTopic } =
+    context;
 
   if (lowUnderstanding > 0) {
     steps.push({
@@ -24,7 +36,7 @@ export function buildMixedReviewPlan(context: {
       activity: "teach-me",
       label: "Teach Me warm-up",
       reason: `${lowUnderstanding} topic${lowUnderstanding === 1 ? "" : "s"} need deeper understanding`,
-      href: "/study/teach-me",
+      href: loopHref("/study/teach-me", courseId, focusTopic),
       minutes: 8,
     });
   }
@@ -35,7 +47,7 @@ export function buildMixedReviewPlan(context: {
       activity: "mixed-review",
       label: "Missed-question drill",
       reason: `${missedQuestions} missed item${missedQuestions === 1 ? "" : "s"} to correct`,
-      href: "/quizzes?filter=missed",
+      href: loopHref("/quizzes?filter=missed", courseId, focusTopic),
       minutes: 10,
     });
   }
@@ -45,7 +57,7 @@ export function buildMixedReviewPlan(context: {
     activity: "quiz",
     label: "Adaptive quiz",
     reason: weakTopics > 0 ? "Target weak mastery gaps" : "Check what stuck",
-    href: "/quizzes",
+    href: loopHref("/quizzes", courseId, focusTopic),
     minutes: 12,
   });
 
@@ -55,7 +67,7 @@ export function buildMixedReviewPlan(context: {
       activity: "flashcards",
       label: "Spaced flashcards",
       reason: `${dueFlashcards} card${dueFlashcards === 1 ? "" : "s"} due today`,
-      href: "/flashcards",
+      href: loopHref("/flashcards", courseId, focusTopic),
       minutes: 8,
     });
   } else {
@@ -64,7 +76,7 @@ export function buildMixedReviewPlan(context: {
       activity: "blurting",
       label: "Blurting finish",
       reason: "Active recall without notes",
-      href: "/study/blurting",
+      href: loopHref("/study/blurting", courseId, focusTopic),
       minutes: 5,
     });
   }

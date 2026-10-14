@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ExternalLink, RefreshCw } from "lucide-react";
 
+import { AddCourseMaterialButton } from "@/components/materials/AddCourseMaterialModal";
 import type { CourseInfoPortal, CourseInfoSection } from "@/lib/lms/course-info/types";
 import { formatDisplayDate } from "@/lib/lms/course-info/html";
 
@@ -100,6 +101,7 @@ export function CourseInfoView({
   );
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async data load on mount or dependency change
     void load();
   }, [load]);
 
@@ -143,6 +145,16 @@ export function CourseInfoView({
 
   return (
     <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-orange-100 bg-white px-4 py-3 shadow-sm">
+        <div>
+          <p className="text-sm font-bold text-stone-900">Course materials</p>
+          <p className="text-[10px] text-stone-500">
+            Chapters and files you add here also appear in Locker, Study, and Core.
+          </p>
+        </div>
+        <AddCourseMaterialButton courseId={courseId} compact />
+      </div>
+
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-teal-100 bg-teal-50/60 px-4 py-3 text-sm text-teal-900">
         <div>
           <p className="font-semibold">Synced from Moodle</p>

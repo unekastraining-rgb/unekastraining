@@ -116,7 +116,7 @@ export function CalendarSettingsPanel({
   }
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-stone-900/40 p-4">
+    <div className="fixed inset-0 z-[600] flex items-center justify-center bg-stone-900/40 p-4">
       <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-orange-100 bg-white shadow-2xl">
         <div className="flex items-center justify-between border-b border-orange-100 px-5 py-4">
           <div className="flex items-center gap-2">

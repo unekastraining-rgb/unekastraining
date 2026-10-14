@@ -150,7 +150,7 @@ export function GradeSchoolHubDashboard({
               </p>
               <Link
                 href={learningStepHref(primaryPlan.courseId, nextLesson)}
-                className="mt-5 inline-flex items-center gap-2 rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-violet-500"
+                className="mt-5 inline-flex min-h-11 items-center gap-2 rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-violet-500 touch-manipulation"
               >
                 <BookOpen className="h-4 w-4" />
                 Start lesson {nextLesson + 1}

@@ -37,7 +37,17 @@ export async function triggerGoogleSyncIfStale(
   }
 
   try {
-    const response = await fetch("/api/calendar/google/sync", { method: "POST" });
+    const controller = new AbortController();
+    const timer =
+      typeof window !== "undefined"
+        ? window.setTimeout(() => controller.abort(), 25_000)
+        : null;
+    const response = await fetch("/api/calendar/google/sync", {
+      method: "POST",
+      credentials: "same-origin",
+      signal: controller.signal,
+    });
+    if (timer !== null) window.clearTimeout(timer);
     const data = await response.json();
     return data.success === true;
   } catch {

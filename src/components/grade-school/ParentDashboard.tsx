@@ -155,7 +155,7 @@ export function ParentDashboard({
                       {!complete ? (
                         <Link
                           href={learningStepHref(plan.courseId, index)}
-                          className="shrink-0 font-semibold text-teal-700 hover:underline"
+                          className="inline-flex min-h-11 shrink-0 items-center rounded-lg px-2 font-semibold text-teal-700 touch-manipulation hover:underline"
                         >
                           Start
                         </Link>
@@ -168,7 +168,7 @@ export function ParentDashboard({
               {nextIndex >= 0 ? (
                 <Link
                   href={learningStepHref(plan.courseId, nextIndex)}
-                  className="mt-5 inline-flex items-center gap-2 rounded-xl bg-teal-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-teal-500"
+                  className="mt-5 inline-flex min-h-11 items-center gap-2 rounded-xl bg-teal-600 px-5 py-2.5 text-sm font-bold text-white touch-manipulation hover:bg-teal-500"
                 >
                   <Sparkles className="h-4 w-4" />
                   Continue lesson {nextIndex + 1}
@@ -177,7 +177,7 @@ export function ParentDashboard({
               ) : (
                 <Link
                   href={`/flashcards?courseId=${encodeURIComponent(plan.courseId)}`}
-                  className="mt-5 inline-flex items-center gap-2 rounded-xl bg-orange-500 px-5 py-2.5 text-sm font-bold text-white hover:bg-orange-600"
+                  className="mt-5 inline-flex min-h-11 items-center gap-2 rounded-xl bg-orange-500 px-5 py-2.5 text-sm font-bold text-white touch-manipulation hover:bg-orange-600"
                 >
                   <BookOpen className="h-4 w-4" />
                   Review flashcards

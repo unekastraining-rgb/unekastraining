@@ -182,6 +182,7 @@ export async function generateCurriculum(input: {
   strengths?: string | null;
   goals?: string | null;
   parentNotes?: string | null;
+  includeOpenAIPro?: boolean;
 }): Promise<GeneratedCurriculum> {
   const subjects =
     input.subjects?.filter(Boolean) ??
@@ -225,6 +226,7 @@ export async function generateCurriculum(input: {
       temperature: 0.35,
       maxTokens: comprehensive ? 12000 : 8192,
       jsonMode: true,
+      includeOpenAIPro: input.includeOpenAIPro,
     },
   );
 

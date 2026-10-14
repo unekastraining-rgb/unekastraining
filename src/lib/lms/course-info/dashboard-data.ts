@@ -33,6 +33,10 @@ export interface CourseResourceItem {
 export interface CourseMaterialLine {
   id: string;
   label: string;
+  body: string;
+  /** Moodle / syllabus section this came from */
+  source: string;
+  url?: string;
 }
 
 export interface CourseDashboardData {
@@ -45,12 +49,11 @@ export interface CourseDashboardData {
   materials: CourseMaterialLine[];
 }
 
+/** Policy chips on the dashboard — grading lives in its own block. */
 const POLICY_SECTIONS: Array<{ sectionId: string; title: string }> = [
-  { sectionId: "attendance", title: "Attendance Policy" },
-  { sectionId: "policies", title: "Course Policies" },
+  { sectionId: "attendance", title: "Attendance" },
   { sectionId: "etiquette", title: "Online Etiquette" },
-  { sectionId: "technology", title: "Technology Requirements" },
-  { sectionId: "grading", title: "Grading Policy" },
+  { sectionId: "technology", title: "Technology" },
 ];
 
 const POLICY_TITLE_PATTERNS: Array<{ pattern: RegExp; title: string }> = [
@@ -59,8 +62,11 @@ const POLICY_TITLE_PATTERNS: Array<{ pattern: RegExp; title: string }> = [
   { pattern: /\bcommunication\b/i, title: "Communication" },
   { pattern: /\bmake[- ]?up\b/i, title: "Makeup Work" },
   { pattern: /\bparticipation\b/i, title: "Participation" },
-  { pattern: /\battendance\b/i, title: "Attendance Policy" },
+  { pattern: /\battendance\b/i, title: "Attendance" },
 ];
+
+const ANNOUNCEMENT_JUNK =
+  /\b(welcome to (the )?forum|use this forum|subscribe to this forum|forum description|no announcements yet)\b/i;
 
 function sectionItems(portal: CourseInfoPortal, sectionId: string) {
   return portal.sections.find((section) => section.id === sectionId)?.items ?? [];
@@ -70,6 +76,14 @@ function previewText(text: string, max = 140): string {
   const flat = text.replace(/\s+/g, " ").trim();
   if (flat.length <= max) return flat;
   return `${flat.slice(0, max).trim()}…`;
+}
+
+function normalizeKey(text: string): string {
+  return text.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function bodyFingerprint(body: string): string {
+  return normalizeKey(body).slice(0, 160);
 }
 
 function parseGradingRows(body: string): GradingRow[] {
@@ -82,6 +96,10 @@ function parseGradingRows(body: string): GradingRow[] {
     const label = match[1]!.replace(/^[\s•\-*\d.)]+/, "").trim();
     const percent = Number(match[2]);
     if (!label || label.length < 2 || percent > 100) continue;
+    // Skip prose that looks like a sentence, not a weight row.
+    if (/\b(will|should|must|please|student)\b/i.test(label) && label.length > 40) {
+      continue;
+    }
     const key = label.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
@@ -98,42 +116,72 @@ function parseGradingScale(body: string): string | undefined {
   return scaleLine?.trim();
 }
 
+function pushPolicy(
+  policies: CoursePolicyItem[],
+  seenTitles: Set<string>,
+  seenBodies: Set<string>,
+  title: string,
+  body: string,
+  id: string,
+) {
+  const trimmed = body.trim();
+  if (!trimmed || trimmed.length < 40) return;
+  const titleKey = normalizeKey(title);
+  const bodyKey = bodyFingerprint(trimmed);
+  if (seenTitles.has(titleKey) || seenBodies.has(bodyKey)) return;
+  seenTitles.add(titleKey);
+  seenBodies.add(bodyKey);
+  policies.push({ id, title, body: trimmed });
+}
+
 function buildPolicies(portal: CourseInfoPortal): CoursePolicyItem[] {
   const policies: CoursePolicyItem[] = [];
-  const seen = new Set<string>();
+  const seenTitles = new Set<string>();
+  const seenBodies = new Set<string>();
 
   for (const { sectionId, title } of POLICY_SECTIONS) {
     for (const item of sectionItems(portal, sectionId)) {
       const body = item.body?.trim();
-      if (!body || body.length < 20) continue;
-      const key = `${sectionId}-${item.title}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      policies.push({
-        id: key,
-        title: item.title && item.title !== title ? item.title : title,
+      if (!body) continue;
+      const displayTitle =
+        item.title && !/^course policies?$/i.test(item.title) ? item.title : title;
+      pushPolicy(
+        policies,
+        seenTitles,
+        seenBodies,
+        displayTitle,
         body,
-      });
+        `${sectionId}-${displayTitle}`,
+      );
     }
   }
 
+  // Split the lumped "Course Policies" portal section into named chips once.
   for (const item of sectionItems(portal, "policies")) {
     const body = item.body?.trim();
     if (!body) continue;
+
+    let matchedPattern = false;
     for (const { pattern, title } of POLICY_TITLE_PATTERNS) {
-      if (!pattern.test(item.title) && !pattern.test(body.slice(0, 200))) continue;
-      const key = title.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      policies.push({ id: `policy-${key}`, title, body });
+      if (!pattern.test(item.title) && !pattern.test(body.slice(0, 240))) continue;
+      matchedPattern = true;
+      pushPolicy(policies, seenTitles, seenBodies, title, body, `policy-${title}`);
     }
-    if (!seen.has(item.title.toLowerCase())) {
-      seen.add(item.title.toLowerCase());
-      policies.push({
-        id: `policy-${item.title}`,
-        title: item.title,
+
+    // Avoid a second "Course Policies" chip that duplicates Full syllabus.
+    if (
+      !matchedPattern &&
+      item.title &&
+      !/^course policies?$/i.test(item.title)
+    ) {
+      pushPolicy(
+        policies,
+        seenTitles,
+        seenBodies,
+        item.title,
         body,
-      });
+        `policy-${item.title}`,
+      );
     }
   }
 
@@ -141,17 +189,28 @@ function buildPolicies(portal: CourseInfoPortal): CoursePolicyItem[] {
 }
 
 function buildAnnouncements(portal: CourseInfoPortal): CourseAnnouncementItem[] {
-  return sectionItems(portal, "announcements").map((item, index) => {
-    const body = item.body ?? "";
-    return {
-      id: `announcement-${index}-${item.title}`,
-      title: item.title,
-      date: item.date,
-      preview: previewText(body),
-      body,
-      url: item.source.url,
-    };
-  });
+  return sectionItems(portal, "announcements")
+    .map((item, index) => {
+      const body = (item.body ?? "").trim();
+      const title = (item.title ?? "").trim() || "Announcement";
+      return {
+        id: `announcement-${index}-${title}`,
+        title,
+        date: item.date,
+        preview: previewText(body, 120),
+        body,
+        url: item.source.url,
+      };
+    })
+    .filter((item) => {
+      if (!item.body && !item.url) return false;
+      if (item.body.length < 24 && !item.date) return false;
+      if (ANNOUNCEMENT_JUNK.test(item.title) || ANNOUNCEMENT_JUNK.test(item.body)) {
+        return false;
+      }
+      return true;
+    })
+    .slice(0, 8);
 }
 
 function buildInstructions(portal: CourseInfoPortal): CourseResourceItem[] {
@@ -184,47 +243,84 @@ function buildInstructions(portal: CourseInfoPortal): CourseResourceItem[] {
   return items.slice(0, 12);
 }
 
+function isConcreteRequirement(line: string): boolean {
+  const text = line.trim();
+  if (text.length < 8 || text.length > 180) return false;
+  if (/^https?:\/\//i.test(text)) return false;
+  if (
+    /\b(textbook|required text|isbn|access code|calculator|laptop|webcam|microphone|headset|browser|chrome|firefox|microsoft|office|zoom|blackboard|canvas|moodle|mymathlab|connect|cengage|pearson|mcgraw|purchase|bring|need)\b/i.test(
+      text,
+    )
+  ) {
+    return true;
+  }
+  if (/^\d+[\).\]]\s+\S/.test(text)) return true;
+  if (/^[•\-]\s+\S/.test(text)) return true;
+  return text.split(/\s+/).length <= 16;
+}
+
+/**
+ * Materials & requirements from Moodle course-info portal:
+ * - `materials` section (textbook / required materials pages)
+ * - `technology` section (tech requirements pages)
+ * We show titled Moodle items first (what was imported), then short requirement lines.
+ */
 function buildMaterials(
+  portal: CourseInfoPortal | null,
   highlights: CourseHighlights,
-  meetings: Array<{ title: string | null; dayOfWeek: number; startTime: string; location: string | null }>,
 ): CourseMaterialLine[] {
-  const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const lines: CourseMaterialLine[] = [];
   const seen = new Set<string>();
 
-  for (const event of highlights.importantEvents) {
-    if (!/\bzoom|virtual|live\s+session|webinar\b/i.test(event.title)) continue;
-    const label = event.date
-      ? `${event.title} · ${new Date(event.date).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`
-      : event.title;
-    if (!seen.has(label)) {
-      seen.add(label);
-      lines.push({ id: event.id, label });
-    }
-  }
-
-  for (const meeting of meetings) {
-    if (!meeting.location?.toLowerCase().includes("zoom") && !meeting.title?.toLowerCase().includes("zoom")) {
-      continue;
-    }
-    const label = `${meeting.title ?? "Class"} — ${DAY_LABELS[meeting.dayOfWeek] ?? "Day"} ${meeting.startTime}${meeting.location ? ` · ${meeting.location}` : ""}`;
-    if (!seen.has(label)) {
-      seen.add(label);
-      lines.push({ id: `meeting-${meeting.dayOfWeek}-${meeting.startTime}`, label });
-    }
-  }
-
-  for (const group of highlights.whatYouNeed) {
-    for (const item of group.items) {
-      const short = previewText(item, 100);
-      if (!seen.has(short)) {
-        seen.add(short);
-        lines.push({ id: `need-${short.slice(0, 24)}`, label: short });
+  if (portal) {
+    for (const sectionId of ["materials", "technology"] as const) {
+      const sourceLabel =
+        sectionId === "materials"
+          ? "Moodle · Materials"
+          : "Moodle · Technology";
+      for (const item of sectionItems(portal, sectionId)) {
+        const title = (item.title ?? "").trim();
+        const body = (item.body ?? "").trim();
+        if (!title && !body) continue;
+        const label = title
+          ? body && body.length < 120 && body !== title
+            ? `${title} — ${previewText(body, 90)}`
+            : title
+          : previewText(body, 110);
+        const key = normalizeKey(label);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        lines.push({
+          id: `${sectionId}-${title || label.slice(0, 24)}`,
+          label: title || previewText(body, 60),
+          body: body || title,
+          source: sourceLabel,
+          url: item.source.url,
+        });
       }
     }
   }
 
-  return lines.slice(0, 10);
+  // Fallback: NLP “what you need” lines when Moodle sections were empty/noisy.
+  if (lines.length === 0) {
+    for (const group of highlights.whatYouNeed) {
+      for (const item of group.items) {
+        if (!isConcreteRequirement(item)) continue;
+        const short = previewText(item, 110);
+        const key = normalizeKey(short);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        lines.push({
+          id: `need-${group.label}-${short.slice(0, 24)}`,
+          label: short,
+          body: item,
+          source: `Syllabus · ${group.label}`,
+        });
+      }
+    }
+  }
+
+  return lines.slice(0, 12);
 }
 
 export function buildCourseDashboardData(
@@ -244,6 +340,7 @@ export function buildCourseDashboardData(
     location: string | null;
   }> = [],
 ): CourseDashboardData {
+  void meetings;
   const portal = parseCourseInfoPortal(courseInfoJson);
   const highlights = buildCourseHighlights(portal, assignments, instructor);
 
@@ -253,13 +350,16 @@ export function buildCourseDashboardData(
         .join("\n")
     : "";
 
+  const gradingRows = gradingBody ? parseGradingRows(gradingBody) : [];
+  const gradingScale = gradingBody ? parseGradingScale(gradingBody) : undefined;
+
   return {
     highlights,
     policies: portal ? buildPolicies(portal) : [],
     announcements: portal ? buildAnnouncements(portal) : [],
     instructions: portal ? buildInstructions(portal) : [],
-    gradingRows: gradingBody ? parseGradingRows(gradingBody) : [],
-    gradingScale: gradingBody ? parseGradingScale(gradingBody) : undefined,
-    materials: buildMaterials(highlights, meetings),
+    gradingRows,
+    gradingScale,
+    materials: buildMaterials(portal, highlights),
   };
 }

@@ -10,6 +10,7 @@ import {
   providerFromState,
 } from "@/lib/lms/oauth";
 import { syncUserLmsProvider } from "@/lib/lms/sync";
+import { sealLmsToken } from "@/lib/security/lms-token-crypto";
 
 export async function GET(request: Request) {
   const origin = getAppOrigin();
@@ -62,6 +63,9 @@ export async function GET(request: Request) {
       refreshToken = tokens.refresh_token ?? null;
     }
 
+    const sealedAccess = sealLmsToken(accessToken);
+    const sealedRefresh = sealLmsToken(refreshToken);
+
     const existing = await db.lMSConnection.findFirst({
       where: { userId: state.userId, provider },
     });
@@ -71,8 +75,8 @@ export async function GET(request: Request) {
         where: { id: existing.id },
         data: {
           baseUrl,
-          accessToken,
-          refreshToken,
+          accessToken: sealedAccess,
+          refreshToken: sealedRefresh,
           status: "connected",
           displayName: baseUrl,
         },
@@ -83,8 +87,8 @@ export async function GET(request: Request) {
           userId: state.userId,
           provider,
           baseUrl,
-          accessToken,
-          refreshToken,
+          accessToken: sealedAccess,
+          refreshToken: sealedRefresh,
           status: "connected",
           displayName: baseUrl ?? provider,
         },

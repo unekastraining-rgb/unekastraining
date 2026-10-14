@@ -23,6 +23,7 @@ export function CoreToolbarTemplatesPanel({
         Built-in paper layouts or import PNG, JPG, and PDF page backgrounds.
       </p>
       <TemplateLibrary
+        compact
         selectedBuiltinId={pageTemplateId}
         selectedImportedId={customBackgroundAssetId ?? undefined}
         onSelectBuiltin={(id) => {

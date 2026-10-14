@@ -83,3 +83,40 @@ export async function POST(request: Request) {
     );
   }
 }
+
+export async function DELETE(request: Request) {
+  try {
+    const user = await getOrCreateDefaultUser();
+    const body = await request.json().catch(() => ({}));
+    const rawIds = Array.isArray(body.ids)
+      ? body.ids
+      : body.id
+        ? [body.id]
+        : [];
+    const ids = rawIds
+      .map((value: unknown) => (typeof value === "string" ? value.trim() : ""))
+      .filter(Boolean);
+
+    if (ids.length === 0) {
+      return NextResponse.json(
+        { success: false, error: "Resource id(s) required." },
+        { status: 400 },
+      );
+    }
+
+    const result = await db.resource.deleteMany({
+      where: { id: { in: ids }, userId: user.id },
+    });
+
+    return NextResponse.json({
+      success: true,
+      data: { deleted: result.count },
+    });
+  } catch (error) {
+    console.error("Failed to delete resources:", error);
+    return NextResponse.json(
+      { success: false, error: "Failed to delete resources." },
+      { status: 500 },
+    );
+  }
+}

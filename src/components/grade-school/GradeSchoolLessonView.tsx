@@ -2,12 +2,14 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowRight, CheckCircle2, Loader2, Sparkles } from "lucide-react";
 
 import { SubjectInteractive } from "@/components/grade-school/SubjectInteractive";
+import { StudyLoopStrip } from "@/components/study/StudyLoopStrip";
 import type { InteractiveLesson } from "@/lib/grade-school/generate-lesson";
 import { subjectEmoji, subjectLabel } from "@/lib/grade-school/subjects";
+import { resolveUrlCourseId } from "@/lib/study/resolve-url-course-id";
 import type { GeneratedCurriculum } from "@/lib/syllabus/types";
 
 function GradeSchoolLessonContent({
@@ -36,6 +38,7 @@ function GradeSchoolLessonContent({
   const learningStep = curriculum?.learningSteps[stepIndex] ?? null;
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync UI state to props or external subscription
     setLoadingPlan(true);
     setError(null);
     Promise.all([
@@ -62,6 +65,7 @@ function GradeSchoolLessonContent({
   useEffect(() => {
     if (!learningStep) return;
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync UI state to props or external subscription
     setLoadingLesson(true);
     setLesson(null);
     setScreenIndex(0);
@@ -173,6 +177,12 @@ function GradeSchoolLessonContent({
           </p>
         ) : null}
       </div>
+
+      <StudyLoopStrip
+        courseId={courseId}
+        courseTitle={curriculum.courseName}
+        topics={[learningStep.title, ...curriculum.topics.map((topic) => topic.name)]}
+      />
 
       {loadingLesson ? (
         <p className="flex items-center gap-2 text-sm text-stone-500">
@@ -317,9 +327,13 @@ function GradeSchoolLessonContent({
   );
 }
 
-export function GradeSchoolLessonView() {
+export function GradeSchoolLessonView({
+  courseIds = [],
+}: {
+  courseIds?: readonly string[];
+}) {
   const searchParams = useSearchParams();
-  const courseId = searchParams.get("courseId") ?? "";
+  const courseId = resolveUrlCourseId(searchParams.get("courseId"), courseIds);
   const step = Number.parseInt(searchParams.get("step") ?? "0", 10);
 
   if (!courseId) {
@@ -335,8 +349,6 @@ export function GradeSchoolLessonView() {
   }
 
   return (
-    <Suspense fallback={<p className="text-sm text-stone-500">Loading lesson…</p>}>
-      <GradeSchoolLessonContent courseId={courseId} initialStep={Number.isNaN(step) ? 0 : step} />
-    </Suspense>
+    <GradeSchoolLessonContent courseId={courseId} initialStep={Number.isNaN(step) ? 0 : step} />
   );
 }

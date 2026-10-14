@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { emptyDocument } from "@/lib/core/note-types";
 import { generateStudyTopicBreakdown } from "@/lib/study-topic/generate-breakdown";
 import type { StudyTopicProfile } from "@/lib/study-topic/types";
+import { getUserAppSettings } from "@/lib/settings/app-settings";
 import { getOrCreateDefaultUser } from "@/lib/user";
 
 export async function POST(request: Request) {
@@ -21,10 +22,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "What do you want to study?" }, { status: 400 });
     }
 
+    const appSettings = await getUserAppSettings(user.id);
     const breakdown = await generateStudyTopicBreakdown({
       title,
       focus: focus || null,
       subject: subject || null,
+      includeOpenAIPro: appSettings.aiUseOpenAIPro,
     });
 
     const profile: StudyTopicProfile = {
@@ -55,11 +58,19 @@ export async function POST(request: Request) {
           },
         },
         topics: {
-          create: breakdown.subtopics.map((subtopic, index) => ({
-            name: subtopic.name,
-            description: subtopic.description,
-            sortOrder: index,
-          })),
+          create: [
+            // Canonical learner target first — generated subtopics support organization only.
+            {
+              name: title,
+              description: breakdown.summary,
+              sortOrder: 0,
+            },
+            ...breakdown.subtopics.map((subtopic, index) => ({
+              name: subtopic.name,
+              description: subtopic.description,
+              sortOrder: index + 1,
+            })),
+          ],
         },
         ...(createNote
           ? {
@@ -84,6 +95,8 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         success: true,
+        /** Canonical learner target — never a generated organizational subtopic. */
+        learningTarget: title,
         course,
         studyTopic: profile,
         materialId,

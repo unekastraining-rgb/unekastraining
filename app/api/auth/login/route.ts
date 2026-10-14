@@ -4,6 +4,10 @@ import {
   attachSessionCookie,
   safeLoginRedirectPath,
 } from "@/lib/auth/session-cookie";
+import {
+  checkSimpleRateLimit,
+  clientIpFromRequest,
+} from "@/lib/api/simple-rate-limit";
 import { findOrCreateUserByEmail } from "@/lib/user";
 
 type LoginBody = {
@@ -63,6 +67,27 @@ export async function POST(request: Request) {
   let body: LoginBody = {};
 
   try {
+    // 2P-51 — process-local login throttle (not a distributed WAF).
+    const ip = clientIpFromRequest(request);
+    const limited = checkSimpleRateLimit({
+      key: `login:${ip}`,
+      limit: 60,
+      windowMs: 60_000,
+    });
+    if (!limited.allowed) {
+      const res = loginErrorResponse(
+        request,
+        "Too many login attempts. Try again shortly.",
+        body,
+        429,
+      );
+      res.headers.set(
+        "Retry-After",
+        String(Math.ceil(limited.retryAfterMs / 1000) || 60),
+      );
+      return res;
+    }
+
     body = await readLoginBody(request);
     const email = body.email?.trim() ?? "";
     const name = body.name?.trim() ?? "";

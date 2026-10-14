@@ -1,7 +1,13 @@
+import { readableCourseTitle } from "@/lib/courses/display-name";
+import { db } from "@/lib/db";
+import { isMetaSyllabusTopic } from "@/lib/csl/six-worked-lesson";
+import {
+  backfillCourseTopicsIfEmpty,
+  backfillUserCourseTopicsIfEmpty,
+} from "@/lib/syllabus/enrich-course-from-syllabus";
+import { sixGuideHref } from "./six-guides";
 import type { SixComponent } from "./six";
 import { SIX_ACTIVITIES } from "./six";
-import { sixGuideHref } from "./six-guides";
-import { db } from "@/lib/db";
 
 export interface SixRecommendation {
   topicId: string;
@@ -102,13 +108,19 @@ export async function getSixRecommendations(
   limit = 6,
   courseId?: string,
 ): Promise<SixRecommendation[]> {
+  if (courseId) {
+    await backfillCourseTopicsIfEmpty(courseId);
+  } else {
+    await backfillUserCourseTopicsIfEmpty(userId);
+  }
+
   const topics = await db.topic.findMany({
     where: {
       course: { userId },
       ...(courseId ? { courseId } : {}),
     },
     include: {
-      course: { select: { id: true, title: true } },
+      course: { select: { id: true, title: true, code: true } },
       masteries: {
         where: { userId },
         take: 1,
@@ -118,6 +130,7 @@ export async function getSixRecommendations(
   });
 
   const candidates = topics
+    .filter((topic) => !isMetaSyllabusTopic(topic.name))
     .map((topic) => {
       const mastery = topic.masteries[0];
       const signals: MasterySignals = {
@@ -146,7 +159,7 @@ export async function getSixRecommendations(
       topicId: topic.id,
       topicName: topic.name,
       courseId: topic.course.id,
-      courseTitle: topic.course.title,
+      courseTitle: readableCourseTitle(topic.course.title, topic.course.code),
       proficiency: Math.round(signals.proficiency * 100),
       understanding: Math.round(signals.understanding * 100),
       recall: Math.round(signals.recall * 100),

@@ -25,7 +25,7 @@ const globalForPrisma = globalThis as unknown as {
 };
 
 // Bump when Prisma schema adds models so dev hot-reload picks up a fresh client.
-const PRISMA_CLIENT_VERSION = 8;
+const PRISMA_CLIENT_VERSION = 11;
 
 function createPrismaClient() {
   const adapter = new PrismaLibSql({
@@ -39,7 +39,9 @@ function isPrismaClientCurrent(client: PrismaClient | undefined): client is Pris
   return Boolean(
     client &&
       globalForPrisma.prismaClientVersion === PRISMA_CLIENT_VERSION &&
-      typeof client.resource?.findMany === "function",
+      typeof client.resource?.findMany === "function" &&
+      typeof client.learnerProfile?.findUnique === "function" &&
+      typeof client.retentionItem?.findMany === "function",
   );
 }
 

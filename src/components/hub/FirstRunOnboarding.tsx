@@ -1,19 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
 import {
   BookOpen,
   Link2,
-  Loader2,
   ScanLine,
-  Sparkles,
 } from "lucide-react";
 
+import { DemoColdStartImport } from "@/components/hub/DemoColdStartImport";
 import { hubTabPath } from "@/lib/hub/tabs";
 import { StudyThisCard } from "@/components/study/StudyThisCard";
 import type { HubUser } from "@/components/hub/types";
+import { coursesScanLandingHref } from "@/lib/study/loop-hrefs";
 
 import { ClassesEmptyState } from "./EmptyStates";
 
@@ -24,28 +22,6 @@ export function FirstRunOnboarding({
   variant?: "hub" | "classes";
   user?: Pick<HubUser, "name" | "email" | "avatarUrl">;
 }) {
-  const router = useRouter();
-  const [loadingDemo, setLoadingDemo] = useState(false);
-  const [demoMessage, setDemoMessage] = useState<string | null>(null);
-  const [demoError, setDemoError] = useState<string | null>(null);
-
-  async function importDemo() {
-    setLoadingDemo(true);
-    setDemoError(null);
-    setDemoMessage(null);
-    try {
-      const response = await fetch("/api/onboarding/demo", { method: "POST" });
-      const data = await response.json();
-      if (!data.success) throw new Error(data.error ?? "Demo import failed.");
-      setDemoMessage(data.result?.message ?? "Demo courses added.");
-      router.refresh();
-    } catch (error) {
-      setDemoError(error instanceof Error ? error.message : "Demo import failed.");
-    } finally {
-      setLoadingDemo(false);
-    }
-  }
-
   const subtitle =
     variant === "classes"
       ? "Pick how you want to get started — you can always add more later."
@@ -84,7 +60,7 @@ export function FirstRunOnboarding({
               icon={<ScanLine className="h-6 w-6" />}
               title="Scan a syllabus"
               description="Upload a PDF or paste text — we'll build your schedule and due dates."
-              href="/courses"
+              href={coursesScanLandingHref()}
               cta="Scan syllabus"
               tone="accent"
             />
@@ -100,42 +76,21 @@ export function FirstRunOnboarding({
         </>
       ) : null}
 
-      <div className="rounded-3xl border border-dashed border-brand bg-brand-soft/30 p-6 text-center">
-        <div
-          className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl"
-          style={{ backgroundColor: "var(--sh-accent-soft)", color: "var(--sh-accent)" }}
-        >
-          <Sparkles className="h-6 w-6" />
-        </div>
-        <p className="mt-4 font-bold text-stone-900">Just exploring?</p>
-        <p className="mx-auto mt-2 max-w-md text-sm text-stone-600">
-          Load sample CS and English courses with assignments so you can try Study
-          Now, Lucky, and the calendar right away.
-        </p>
-        <button
-          type="button"
-          onClick={() => void importDemo()}
-          disabled={loadingDemo}
-          className="btn-accent mt-4 inline-flex items-center gap-2 px-5 py-2.5 text-sm disabled:opacity-60"
-        >
-          {loadingDemo ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-          Import demo data
-        </button>
-        {demoMessage ? (
-          <p className="mt-3 text-sm font-medium text-emerald-700">{demoMessage}</p>
-        ) : null}
-        {demoError ? (
-          <p className="mt-3 text-sm text-rose-700">{demoError}</p>
-        ) : null}
-      </div>
+      <DemoColdStartImport />
 
       <div className="flex flex-wrap justify-center gap-3 text-sm">
-        <Link href="/study" className="font-semibold text-brand hover:underline">
+        <Link
+          href="/study"
+          className="inline-flex min-h-11 items-center font-semibold text-brand hover:underline touch-manipulation"
+        >
           Browse Study Hub →
         </Link>
         <span className="text-stone-300">·</span>
-        <Link href="/core" className="font-semibold text-brand hover:underline">
-          Try Core Notes →
+        <Link
+          href="/core"
+          className="inline-flex min-h-11 items-center font-semibold text-brand hover:underline touch-manipulation"
+        >
+          Try Core study pack →
         </Link>
       </div>
     </div>

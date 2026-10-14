@@ -11,6 +11,20 @@ import {
 import type { WorkspaceCalendarItem } from "@/lib/calendar/workspace-types";
 
 const MIN_DURATION_MS = 15 * 60 * 1000;
+/** Pointer travel below this is a tap/click, not a drag. */
+const DRAG_THRESHOLD_PX = 4;
+
+/** Swallow the click a pointer drag leaves behind so it cannot select or create. */
+function suppressNextClick() {
+  const swallow = (event: MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+  };
+  document.addEventListener("click", swallow, { capture: true, once: true });
+  window.setTimeout(() => {
+    document.removeEventListener("click", swallow, { capture: true });
+  }, 0);
+}
 
 interface ResizableTimedEventProps {
   item: WorkspaceCalendarItem;
@@ -158,32 +172,48 @@ export function ResizableTimedEvent({
       origEnd: new Date(item.endAt),
     };
 
-    const onMove = (moveEvent: PointerEvent) => {
+    const detach = () => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("pointercancel", onCancel);
+      sessionRef.current = null;
+      setPreview(null);
+    };
+
+    function onMove(moveEvent: PointerEvent) {
       const session = sessionRef.current;
       if (!session || session.mode !== "resize") return;
       applyResizePreview(snapDeltaMinutes(moveEvent.clientY - session.startY));
-    };
+    }
 
-    const onUp = (upEvent: PointerEvent) => {
+    function onCancel() {
+      detach();
+    }
+
+    function onUp(upEvent: PointerEvent) {
       const session = sessionRef.current;
-      document.removeEventListener("pointermove", onMove);
-      document.removeEventListener("pointerup", onUp);
-      sessionRef.current = null;
-      setPreview(null);
+      detach();
 
       if (!session || session.mode !== "resize") return;
+      suppressNextClick();
       commitResize(snapDeltaMinutes(upEvent.clientY - session.startY));
-    };
+    }
 
     document.addEventListener("pointermove", onMove);
     document.addEventListener("pointerup", onUp);
+    document.addEventListener("pointercancel", onCancel);
   }
 
   function beginMove(event: React.PointerEvent) {
+    if (event.button > 0) return;
     if (!item.editable || !item.endAt) return;
 
-    event.preventDefault();
     event.stopPropagation();
+
+    // Touch and pen have to claim the gesture, otherwise a drag scrolls the grid.
+    // That cancels the chip's click, so those pointers select on pointerup instead.
+    const claimsGesture = event.pointerType !== "mouse";
+    if (claimsGesture) event.preventDefault();
 
     sessionRef.current = {
       mode: "move",
@@ -195,36 +225,65 @@ export function ResizableTimedEvent({
       origEnd: new Date(item.endAt),
     };
 
-    const onPointerMove = (moveEvent: PointerEvent) => {
-      const session = sessionRef.current;
-      if (!session || session.mode !== "move") return;
-      applyMovePreview(
-        moveEvent.clientX - session.startX,
-        moveEvent.clientY - session.startY,
-      );
-    };
+    let dragging = false;
 
-    const onPointerUp = (upEvent: PointerEvent) => {
-      const session = sessionRef.current;
+    const detach = () => {
       document.removeEventListener("pointermove", onPointerMove);
       document.removeEventListener("pointerup", onPointerUp);
+      document.removeEventListener("pointercancel", onPointerCancel);
       sessionRef.current = null;
       setMoveOffset(null);
+    };
+
+    function onPointerMove(moveEvent: PointerEvent) {
+      const session = sessionRef.current;
+      if (!session || session.mode !== "move") return;
+
+      const deltaX = moveEvent.clientX - session.startX;
+      const deltaY = moveEvent.clientY - session.startY;
+
+      if (!dragging) {
+        if (Math.hypot(deltaX, deltaY) < DRAG_THRESHOLD_PX) return;
+        dragging = true;
+      }
+
+      moveEvent.preventDefault();
+      applyMovePreview(deltaX, deltaY);
+    }
+
+    function onPointerCancel() {
+      detach();
+    }
+
+    function onPointerUp(upEvent: PointerEvent) {
+      const session = sessionRef.current;
+      detach();
 
       if (!session || session.mode !== "move") return;
+
+      if (!dragging) {
+        // A press that never travelled is a tap on the event, not a reschedule.
+        if (claimsGesture) onSelect();
+        return;
+      }
+
+      suppressNextClick();
       commitMove(
         upEvent.clientX - session.startX,
         upEvent.clientY - session.startY,
       );
-    };
+    }
 
     document.addEventListener("pointermove", onPointerMove);
     document.addEventListener("pointerup", onPointerUp);
+    document.addEventListener("pointercancel", onPointerCancel);
   }
 
   return (
     <div
-      className="group absolute inset-x-1 z-10"
+      className="group absolute inset-x-0 z-10 px-1"
+      onClick={onSelect}
+      role="presentation"
       style={{
         top: Math.max(0, displayTop),
         height: Math.max(28, displayHeight),
@@ -234,12 +293,12 @@ export function ResizableTimedEvent({
         transition: moveOffset ? "none" : undefined,
       }}
     >
-      {item.editable ? (
+      {item.editable && item.endAt && !item.allDay ? (
         <div
           role="separator"
           aria-label="Resize start time"
           onPointerDown={(e) => beginResize("top", e)}
-          className="absolute inset-x-0 top-0 z-20 h-1.5 cursor-ns-resize rounded-t-lg opacity-0 transition group-hover:opacity-100"
+          className="absolute left-1 right-1 top-0 z-20 h-1.5 cursor-ns-resize rounded-t-lg opacity-0 transition group-hover:opacity-100"
           style={{ backgroundColor: item.color }}
         />
       ) : null}
@@ -256,12 +315,12 @@ export function ResizableTimedEvent({
         style={{ height: "100%" }}
       />
 
-      {item.editable ? (
+      {item.editable && item.endAt && !item.allDay ? (
         <div
           role="separator"
           aria-label="Resize end time"
           onPointerDown={(e) => beginResize("bottom", e)}
-          className="absolute inset-x-0 bottom-0 z-20 h-1.5 cursor-ns-resize rounded-b-lg opacity-0 transition group-hover:opacity-100"
+          className="absolute bottom-0 left-1 right-1 z-20 h-1.5 cursor-ns-resize rounded-b-lg opacity-0 transition group-hover:opacity-100"
           style={{ backgroundColor: item.color }}
         />
       ) : null}

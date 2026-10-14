@@ -1,6 +1,16 @@
+function extractFencedJson(content: string): string | null {
+  const jsonFence = content.match(/```json\s*([\s\S]*?)```/i);
+  if (jsonFence?.[1]?.trim()) return jsonFence[1].trim();
+
+  const bareFence = content.match(/```\s*([\s\S]*?)```/);
+  const inner = bareFence?.[1]?.trim() ?? "";
+  if (inner && /^\s*[{\[]/.test(inner)) return inner;
+
+  return null;
+}
+
 export function extractJsonPayload(content: string): string {
-  const fenced = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-  let raw = (fenced?.[1] ?? content).trim();
+  let raw = (extractFencedJson(content) ?? content).trim();
 
   const start = raw.indexOf("{");
   const end = raw.lastIndexOf("}");
@@ -74,4 +84,22 @@ export function parseAiJson<T>(
   }
 
   throw new Error(fallbackMessage);
+}
+
+/** True when an error string is source code, a JSON parse dump, or a Prisma blob. */
+export function looksLikeModelDump(text: string): boolean {
+  const t = text.trim();
+  if (t.length > 180) return true;
+  return /public class|System\.out|void main\s*\(|Unexpected token|is not valid JSON|Invalid `prisma|```(?:java|python|cpp|c\+\+)/i.test(
+    t,
+  );
+}
+
+export function friendlyUserFacingAiError(
+  error: unknown,
+  fallback = "Could not finish that. Please try again.",
+): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  if (!raw.trim() || looksLikeModelDump(raw)) return fallback;
+  return raw.trim();
 }

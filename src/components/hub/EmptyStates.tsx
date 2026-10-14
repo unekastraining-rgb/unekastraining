@@ -22,7 +22,7 @@ export function EmptyState({
   secondaryLabel?: string;
 }) {
   return (
-    <div className="card-elevated border-dashed bg-gradient-to-br from-white via-[color-mix(in_srgb,var(--sh-highlight-soft)_40%,white)] to-[color-mix(in_srgb,var(--sh-primary-soft)_35%,white)] px-8 py-14 text-center md:px-12">
+    <div className="card-elevated hub-empty-state-gradient border-dashed px-8 py-14 text-center md:px-12">
       <div className="theme-icon-tile mx-auto mb-6 flex h-20 w-20 items-center justify-center !p-0 shadow-md">
         {icon}
       </div>
@@ -80,11 +80,11 @@ export function LockerEmptyState() {
     <EmptyState
       icon={<Sparkles className="h-10 w-10" />}
       title="Your locker is empty"
-      description="Course materials and study tools will show up here once you add classes."
+      description="Add a class to fill your locker, or open Practice Hub to quiz, flashcards, games, Six, and Lucky without waiting."
       primaryHref="/courses"
       primaryLabel="Add class"
-      secondaryHref="/flashcards"
-      secondaryLabel="Start flashcards"
+      secondaryHref="/study/practice-hub"
+      secondaryLabel="Open Practice Hub"
     />
   );
 }

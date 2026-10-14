@@ -1,10 +1,10 @@
 "use client";
 
-import Image from "next/image";
 import { Camera } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { ProfilePhotoCropModal } from "./ProfilePhotoCropModal";
+import { useIsClientMounted } from "@/hooks/useClientSnapshot";
 
 export function ProfileAvatarUpload({
   avatarUrl,
@@ -21,8 +21,10 @@ export function ProfileAvatarUpload({
   const [url, setUrl] = useState(avatarUrl);
   const [uploading, setUploading] = useState(false);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const mounted = useIsClientMounted();
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync UI state to props or external subscription
     setUrl(avatarUrl);
   }, [avatarUrl]);
 
@@ -62,11 +64,22 @@ export function ProfileAvatarUpload({
       <button
         type="button"
         onClick={() => inputRef.current?.click()}
-        className={`group relative ${dim} shrink-0 overflow-hidden ${radius} bg-gradient-to-br from-[color-mix(in_srgb,var(--sh-primary)_35%,white)] to-[color-mix(in_srgb,var(--sh-primary)_20%,white)] ring-2 ring-white shadow-sm`}
+        className={`group relative ${dim} shrink-0 overflow-hidden ${radius} ring-2 ring-white shadow-sm`}
+        style={{
+          background:
+            "linear-gradient(to bottom right, color-mix(in srgb, var(--sh-primary) 35%, white), color-mix(in srgb, var(--sh-primary) 20%, white))",
+        }}
         title="Upload profile photo"
       >
-        {url ? (
-          <Image src={url} alt="" fill className="object-cover object-center" unoptimized />
+        {mounted && url ? (
+          // Native img avoids Next/Image SSR wrapper mismatches on user uploads.
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={url}
+            alt=""
+            className="h-full w-full object-cover object-center"
+            onError={() => setUrl(null)}
+          />
         ) : (
           <div
             className={`flex h-full w-full items-center justify-center font-black text-stone-800 ${fallbackText}`}
@@ -82,18 +95,18 @@ export function ProfileAvatarUpload({
             …
           </span>
         ) : null}
-        <input
-          ref={inputRef}
-          type="file"
-          accept="image/png,image/jpeg,image/webp"
-          className="hidden"
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            e.target.value = "";
-            if (file) onFileSelected(file);
-          }}
-        />
       </button>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (file) onFileSelected(file);
+        }}
+      />
 
       {pendingFile ? (
         <ProfilePhotoCropModal

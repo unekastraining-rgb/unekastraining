@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { applyToEventPalette } from "@/lib/calendar/color-scales";
 import { resolveCalendarAppearance } from "@/lib/calendar/calendar-themes";
@@ -27,17 +27,10 @@ import type {
   WorkspaceCourse,
 } from "@/lib/calendar/workspace-types";
 import { DEFAULT_EVENT_TYPES } from "@/lib/calendar/workspace-types";
-import { triggerGoogleSyncIfStale } from "@/lib/calendar/google-background-sync";
-import { triggerLmsSyncIfStale } from "@/lib/lms/background-sync";
+import { runCalendarBackgroundSync } from "@/lib/calendar/client-sync";
+import type { GoogleConnectionStatus } from "@/lib/calendar/client-sync";
 
-export interface GoogleCalendarConnection {
-  id: string;
-  calendarName: string | null;
-  externalCalendarId: string;
-  color: string | null;
-  status: string;
-  lastSyncedAt: string | null;
-}
+export type GoogleCalendarConnection = GoogleConnectionStatus;
 
 function resolveCalendarId(item: WorkspaceCalendarItem): string {
   if (item.courseId) return item.courseId;
@@ -94,7 +87,12 @@ export function useCalendarWorkspace(
 ) {
   const [courses, setCourses] = useState(initialCourses);
   const [items, setItems] = useState<WorkspaceCalendarItem[]>([]);
+  const itemsRef = useRef(items);
+  // eslint-disable-next-line react-hooks/refs -- mirror items for async fetch guards
+  itemsRef.current = items;
   const [loading, setLoading] = useState(true);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
+  const hasLoadedOnceRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [settings, setSettings] = useState<CalendarSettings>(
     DEFAULT_CALENDAR_SETTINGS,
@@ -122,6 +120,7 @@ export function useCalendarWorkspace(
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
     if (params.get("settings") === "1") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync UI state to props or external subscription
       setSettingsOpen(true);
     }
     if (window.matchMedia("(min-width: 1024px)").matches) {
@@ -136,36 +135,71 @@ export function useCalendarWorkspace(
     [view, anchorDate, weekStartsOnMonday],
   );
 
-  const fetchRange = useMemo(() => {
+  const fetchRangeKey = useMemo(() => {
     const start = new Date(viewRange.start);
     start.setDate(start.getDate() - 14);
     const end = new Date(viewRange.end);
     end.setDate(end.getDate() + 14);
-    return { start, end };
+    return `${start.toISOString()}|${end.toISOString()}`;
   }, [viewRange]);
 
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization -- stable settings loader; options.initialView is the only external input
   const loadSettings = useCallback(async () => {
-    const response = await fetch("/api/calendar/settings");
-    const json = await response.json();
-    if (json.success) {
-      setSettings(json.settings);
-      if (!options?.initialView) {
-        setView(json.settings.defaultView);
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 4_000);
+    try {
+      const response = await fetch("/api/calendar/settings", {
+        credentials: "same-origin",
+        signal: controller.signal,
+      });
+      const json = await response.json();
+      if (json.success) {
+        setSettings(json.settings);
+        if (!options?.initialView) {
+          setView(json.settings.defaultView);
+        }
       }
+    } catch {
+      // Fall back to defaults — calendar still loads.
+    } finally {
+      window.clearTimeout(timeout);
     }
   }, [options?.initialView]);
 
+  const loadGenerationRef = useRef(0);
+
   const loadCalendar = useCallback(async () => {
-    setLoading(true);
+    const generation = ++loadGenerationRef.current;
     setError(null);
+    const showInitialSpinner =
+      !hasLoadedOnceRef.current && itemsRef.current.length === 0;
+    if (showInitialSpinner) setLoading(true);
+
+    const [startIso, endIso] = fetchRangeKey.split("|");
+    const params = new URLSearchParams({
+      start: startIso,
+      end: endIso,
+    });
+
+    const loadingWatchdog = window.setTimeout(() => {
+      if (generation === loadGenerationRef.current) {
+        setLoading(false);
+        hasLoadedOnceRef.current = true;
+        setHasLoadedOnce(true);
+      }
+    }, 12_000);
 
     try {
-      const params = new URLSearchParams({
-        start: fetchRange.start.toISOString(),
-        end: fetchRange.end.toISOString(),
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 10_000);
+      const response = await fetch(`/api/calendar?${params}`, {
+        credentials: "same-origin",
+        signal: controller.signal,
       });
-      const response = await fetch(`/api/calendar?${params}`);
+      window.clearTimeout(timeout);
       const json = await response.json();
+
+      if (generation !== loadGenerationRef.current) return;
 
       if (!json.success) {
         throw new Error(json.error ?? "Failed to load calendar");
@@ -173,57 +207,48 @@ export function useCalendarWorkspace(
 
       setItems(json.data.items);
       setCourses(json.data.courses);
-      setLoading(false);
+      hasLoadedOnceRef.current = true;
+      setHasLoadedOnce(true);
 
-      void (async () => {
-        try {
-          let shouldRefresh = false;
-
-          const googleResponse = await fetch("/api/calendar/google/status");
-          const googleJson = await googleResponse.json();
-          if (googleJson.success) {
-            const connections = googleJson.connections ?? [];
-            setGoogleConnections(
-              connections.filter(
-                (connection: GoogleCalendarConnection) =>
-                  connection.status === "connected",
-              ),
-            );
-
-            const synced = await triggerGoogleSyncIfStale(connections);
-            if (synced) shouldRefresh = true;
-          }
-
-          const lmsResponse = await fetch("/api/lms/connect");
-          const lmsJson = await lmsResponse.json();
-          if (lmsJson.success) {
-            const lmsSynced = await triggerLmsSyncIfStale(lmsJson.connections ?? []);
-            if (lmsSynced) shouldRefresh = true;
-          }
-
-          if (shouldRefresh) {
-            const refresh = await fetch(`/api/calendar?${params}`);
-            const refreshJson = await refresh.json();
-            if (refreshJson.success) {
-              setItems(refreshJson.data.items);
-              setCourses(refreshJson.data.courses);
-            }
-          }
-        } catch {
-          // Background sync failures should not block the calendar UI.
-        }
-      })();
+      // Sync Google/LMS after the grid is visible — never blocks loading state.
+      window.setTimeout(() => {
+        void runCalendarBackgroundSync({
+          params,
+          onGoogleConnections: setGoogleConnections,
+          onData: (data) => {
+            if (generation !== loadGenerationRef.current) return;
+            setItems(data.items);
+            setCourses(data.courses);
+          },
+        });
+      }, 250);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load calendar");
-      setLoading(false);
+      if (generation !== loadGenerationRef.current) return;
+      setError(
+        err instanceof Error && err.name === "AbortError"
+          ? "Calendar took too long to load. Tap Retry."
+          : err instanceof Error
+            ? err.message
+            : "Failed to load calendar",
+      );
+      setHasLoadedOnce(true);
+      hasLoadedOnceRef.current = true;
+    } finally {
+      window.clearTimeout(loadingWatchdog);
+      if (generation === loadGenerationRef.current) {
+        setLoading(false);
+      }
     }
-  }, [fetchRange.end, fetchRange.start]);
+  }, [fetchRangeKey]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async data load on mount or dependency change
     void loadSettings();
   }, [loadSettings]);
 
   useEffect(() => {
+    // Load events immediately; settings apply when they arrive (colors/filters).
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async data load on mount or dependency change
     void loadCalendar();
   }, [loadCalendar]);
 
@@ -323,6 +348,7 @@ export function useCalendarWorkspace(
     const response = await fetch("/api/calendar/settings", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
       body: JSON.stringify(patch),
     });
     const json = await response.json();
@@ -346,6 +372,7 @@ export function useCalendarWorkspace(
       const response = await fetch(`/api/courses/${courseId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
         body: JSON.stringify({ color }),
       });
       const json = await response.json();
@@ -372,6 +399,7 @@ export function useCalendarWorkspace(
       const response = await fetch("/api/calendar/google/status", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
         body: JSON.stringify({ connectionId, color }),
       });
       const json = await response.json();
@@ -500,7 +528,8 @@ export function useCalendarWorkspace(
     courses,
     items: filteredItems,
     allItems: scaledItems,
-    loading,
+    loading: loading && !hasLoadedOnce,
+    hasLoadedOnce,
     error,
     settings,
     settingsOpen,
@@ -522,6 +551,7 @@ export function useCalendarWorkspace(
     timeInsights,
     googleConnections,
     loadCalendar,
+    refresh: loadCalendar,
     updateSettings,
     toggleCalendarVisibility,
     updateCourseColor,

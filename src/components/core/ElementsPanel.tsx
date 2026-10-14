@@ -10,6 +10,7 @@ import {
   Upload,
 } from "lucide-react";
 
+import { CoreChromeAction } from "@/components/core/CoreChromeAction";
 import {
   ELEMENT_CATEGORIES,
   ELEMENTS_CATALOG,
@@ -97,7 +98,10 @@ export function ElementsPanel({
   const [imported, setImported] = useState<Array<{ id: string; name: string }>>([]);
   const [uploading, setUploading] = useState(false);
 
+  const touchChip = compact ? " min-h-11 touch-manipulation" : "";
+
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync UI state to props or external subscription
     setFavorites(getElementFavorites());
     setRecent(getRecentElements());
   }, []);
@@ -110,6 +114,7 @@ export function ElementsPanel({
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async data load on mount or dependency change
     void loadImported();
   }, [loadImported]);
 
@@ -172,11 +177,6 @@ export function ElementsPanel({
     onInsert(element);
   }
 
-  function handleFavorite(event: React.MouseEvent, id: string) {
-    event.stopPropagation();
-    setFavorites(toggleElementFavorite(id));
-  }
-
   async function uploadElement(file: File) {
     setUploading(true);
     try {
@@ -217,11 +217,11 @@ export function ElementsPanel({
 
       <div className="flex gap-1 overflow-x-auto pb-1">
         {tabs.map(({ id, label, icon: Icon }) => (
-          <button
+          <CoreChromeAction
             key={id}
-            type="button"
-            onClick={() => setTab(id)}
-            className={`inline-flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1 text-[10px] font-semibold ${
+            onActivate={() => setTab(id)}
+            pressed={tab === id}
+            className={`inline-flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1 text-[10px] font-semibold${touchChip} ${
               tab === id
                 ? "bg-stone-900 text-white"
                 : "bg-stone-100 text-stone-600 hover:bg-stone-200"
@@ -229,7 +229,7 @@ export function ElementsPanel({
           >
             <Icon className="h-3 w-3" />
             {label}
-          </button>
+          </CoreChromeAction>
         ))}
       </div>
 
@@ -253,46 +253,46 @@ export function ElementsPanel({
                 { id: "text", label: "Text stamps" },
               ] as const
             ).map(({ id, label }) => (
-              <button
+              <CoreChromeAction
                 key={id}
-                type="button"
-                onClick={() => setRoleFilter(id)}
-                className={`rounded-lg px-2.5 py-1 text-[10px] font-semibold ${
+                onActivate={() => setRoleFilter(id)}
+                pressed={roleFilter === id}
+                className={`rounded-lg px-2.5 py-1 text-[10px] font-semibold${touchChip} ${
                   roleFilter === id
                     ? "bg-orange-500 text-white"
                     : "bg-stone-100 text-stone-600"
                 }`}
               >
                 {label}
-              </button>
+              </CoreChromeAction>
             ))}
           </div>
           <div className="-mx-1 flex max-h-24 flex-wrap gap-1 overflow-y-auto px-1">
-          <button
-            type="button"
-            onClick={() => setCategory("all")}
-            className={`shrink-0 rounded-lg px-2 py-1 text-[10px] font-semibold ${
+          <CoreChromeAction
+            onActivate={() => setCategory("all")}
+            pressed={category === "all"}
+            className={`shrink-0 rounded-lg px-2 py-1 text-[10px] font-semibold${touchChip} ${
               category === "all"
                 ? "bg-orange-500 text-white"
                 : "bg-stone-100 text-stone-600 hover:bg-stone-200"
             }`}
           >
             All
-          </button>
+          </CoreChromeAction>
           {(Object.entries(ELEMENT_CATEGORIES) as [ElementCategoryId, string][]).map(
             ([id, label]) => (
-              <button
+              <CoreChromeAction
                 key={id}
-                type="button"
-                onClick={() => setCategory(id)}
-                className={`shrink-0 rounded-lg px-2 py-1 text-[10px] font-semibold ${
+                onActivate={() => setCategory(id)}
+                pressed={category === id}
+                className={`shrink-0 rounded-lg px-2 py-1 text-[10px] font-semibold${touchChip} ${
                   category === id
                     ? "bg-orange-500 text-white"
                     : "bg-stone-100 text-stone-600 hover:bg-stone-200"
                 }`}
               >
                 {label}
-              </button>
+              </CoreChromeAction>
             ),
           )}
         </div>
@@ -322,22 +322,26 @@ export function ElementsPanel({
 
       <div className="grid max-h-72 grid-cols-4 gap-2 overflow-y-auto sm:grid-cols-5">
         {displayedItems.map((item) => (
-          <div
-            key={item.id}
-            role="button"
-            tabIndex={0}
-            onClick={() => handleInsert(item)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") handleInsert(item);
-            }}
-            className="group relative flex aspect-square cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border border-stone-100 bg-stone-50 p-1.5 transition hover:border-orange-200 hover:bg-orange-50/50"
-            title={item.name}
-          >
-            <button
-              type="button"
-              onClick={(e) => handleFavorite(e, item.id)}
-              className="absolute right-0.5 top-0.5 rounded p-0.5 opacity-0 transition group-hover:opacity-100"
+          <div key={item.id} className="relative">
+            <CoreChromeAction
+              onActivate={() => handleInsert(item)}
+              title={item.name}
+              aria-label={`Insert ${item.name}`}
+              className={`group flex aspect-square w-full flex-col items-center justify-center gap-1 rounded-xl border border-stone-100 bg-stone-50 p-1.5 transition hover:border-orange-200 hover:bg-orange-50/50${touchChip}`}
+            >
+              <ElementPreview element={item} />
+              <span className="w-full truncate text-center text-[9px] font-semibold text-stone-600">
+                {item.name}
+              </span>
+            </CoreChromeAction>
+            <CoreChromeAction
+              onActivate={() => {
+                const next = toggleElementFavorite(item.id);
+                setFavorites(next);
+              }}
               title={favorites.includes(item.id) ? "Remove favorite" : "Add favorite"}
+              aria-label={favorites.includes(item.id) ? "Remove favorite" : "Add favorite"}
+              className="absolute right-0.5 top-0.5 z-10 rounded p-1.5 text-stone-400 touch-manipulation"
             >
               <Star
                 className={`h-3 w-3 ${
@@ -346,11 +350,7 @@ export function ElementsPanel({
                     : "text-stone-300"
                 }`}
               />
-            </button>
-            <ElementPreview element={item} />
-            <span className="w-full truncate text-center text-[9px] font-semibold text-stone-600">
-              {item.name}
-            </span>
+            </CoreChromeAction>
           </div>
         ))}
       </div>

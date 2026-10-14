@@ -3,7 +3,7 @@ export function htmlToPlainText(html: string): string {
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
     .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/p>/gi, "\n")
+    .replace(/<\/(p|h[1-6]|div|tr|dt|dd|section)>/gi, "\n")
     .replace(/<li[^>]*>/gi, "\n• ")
     .replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;/g, " ")
@@ -49,7 +49,8 @@ export function unixToIso(unix: number | null | undefined): string | undefined {
 export function formatDisplayDate(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleDateString(undefined, {
+  // Fixed locale so SSR and the browser format the same string.
+  return date.toLocaleDateString("en-US", {
     weekday: "short",
     month: "short",
     day: "numeric",

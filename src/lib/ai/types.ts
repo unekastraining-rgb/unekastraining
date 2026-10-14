@@ -11,6 +11,13 @@ export interface AICompletionOptions {
   maxTokens?: number;
   /** Ask the provider to return strict JSON when supported. */
   jsonMode?: boolean;
+  /** Append OpenAI after free Gemini→Groq→OpenRouter when OPENAI_API_KEY is set. */
+  includeOpenAIPro?: boolean;
+  /**
+   * Skip these provider names (e.g. after a weak quiz bank) so quality retries
+   * rotate Gemini → Groq → OpenRouter instead of reusing the same head.
+   */
+  skipProviders?: string[];
 }
 
 export interface AIUsage {

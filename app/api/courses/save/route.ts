@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { AssignmentKind, MaterialType } from "@/generated/prisma";
 import { db } from "@/lib/db";
 import { parseMeetingScheduleFromText, upsertClassMeetings } from "@/lib/lms/meetings";
+import { enrichCourseFromSyllabus } from "@/lib/syllabus/enrich-course-from-syllabus";
 import { getUploadFilePath } from "@/lib/syllabus/storage";
 import type { SaveCoursePayload } from "@/lib/syllabus/types";
 import { getOrCreateDefaultUser } from "@/lib/user";
@@ -76,7 +77,25 @@ export async function POST(request: Request) {
     ];
     const meetingsImported = await upsertClassMeetings(course.id, meetingCandidates);
 
-    return NextResponse.json({ course, meetingsImported }, { status: 201 });
+    let topicsCreated = 0;
+    try {
+      const enriched = await enrichCourseFromSyllabus({
+        userId: user.id,
+        courseId: course.id,
+        syllabusText: extractedText,
+        courseTitle: extraction.courseName,
+        courseCode: extraction.courseCode || null,
+        instructor: extraction.instructor,
+      });
+      topicsCreated = enriched.topicsCreated;
+    } catch (error) {
+      console.warn("Syllabus AI enrichment failed for course", course.id, error);
+    }
+
+    return NextResponse.json(
+      { course, meetingsImported, topicsCreated },
+      { status: 201 },
+    );
   } catch (error) {
     console.error("Failed to save course:", error);
     return NextResponse.json(

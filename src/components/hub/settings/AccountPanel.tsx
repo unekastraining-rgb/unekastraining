@@ -6,9 +6,11 @@ import { useEffect, useState } from "react";
 import { Loader2, LogOut } from "lucide-react";
 
 import { ProfileAvatarUpload } from "@/components/hub/ProfileAvatarUpload";
+import { useIsClientMounted } from "@/hooks/useClientSnapshot";
 
 export function AccountPanel() {
   const router = useRouter();
+  const mounted = useIsClientMounted();
   const [user, setUser] = useState<{
     email: string;
     name: string | null;
@@ -61,7 +63,7 @@ export function AccountPanel() {
     window.location.href = "/login";
   }
 
-  if (loading) {
+  if (!mounted || loading) {
     return <p className="text-sm text-stone-500">Loading account…</p>;
   }
 
@@ -91,7 +93,7 @@ export function AccountPanel() {
               onChange={(event) => setName(event.target.value)}
               placeholder="What should we call you?"
               maxLength={80}
-              className="min-w-0 flex-1 rounded-xl border border-brand bg-white px-4 py-2.5 text-sm text-stone-900 outline-none focus:ring-2 focus:ring-[color-mix(in_srgb,var(--sh-primary)_25%,transparent)]"
+              className="input-brand hub-input-focus-ring min-w-0 flex-1 rounded-xl border border-brand bg-white px-4 py-2.5 text-sm text-stone-900"
             />
             <button
               type="button"

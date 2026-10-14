@@ -5,7 +5,7 @@ import { CalendarRange, ClipboardCheck, GraduationCap, Laptop, Package, Truck } 
 
 import {
   buildCourseHighlightsFromJson,
-  formatDaysUntilLabel,
+  formatEventTiming,
   formatHeadlineDate,
   formatTermDate,
   type CourseHighlights,
@@ -126,13 +126,8 @@ export function CourseHeadlines({
                     className="rounded-2xl border border-violet-200 bg-violet-50/70 px-4 py-3"
                   >
                     <p className="font-semibold text-violet-950">{item.title}</p>
-                    {item.date ? (
-                      <p className="mt-0.5 text-sm text-violet-800">
-                        {formatHeadlineDate(item.date)}
-                        {item.daysUntil !== undefined
-                          ? ` · ${formatDaysUntilLabel(item.daysUntil)}`
-                          : null}
-                      </p>
+                    {formatEventTiming(item) ? (
+                      <p className="mt-0.5 text-sm text-violet-800">{formatEventTiming(item)}</p>
                     ) : (
                       <p className="mt-0.5 text-sm text-violet-700">
                         Date in syllabus — see assignments for due dates
@@ -146,7 +141,7 @@ export function CourseHeadlines({
 
           <HighlightPanel
             icon={CalendarRange}
-            title="Important dates & sessions"
+            title="Important dates"
             empty="No syllabus events found yet — sync Moodle to refresh."
           >
             {highlights.importantEvents.length > 0 ? (
@@ -157,16 +152,9 @@ export function CourseHeadlines({
                     className="rounded-2xl border border-amber-200 bg-amber-50/70 px-4 py-3"
                   >
                     <p className="font-semibold text-amber-950">{item.title}</p>
-                    {item.date ? (
-                      <p className="mt-0.5 text-sm text-amber-800">
-                        {formatHeadlineDate(item.date)}
-                        {item.daysUntil !== undefined
-                          ? ` · ${formatDaysUntilLabel(item.daysUntil)}`
-                          : null}
-                      </p>
-                    ) : (
-                      <p className="mt-0.5 text-sm text-amber-700">See full syllabus for timing</p>
-                    )}
+                    {formatEventTiming(item) ? (
+                      <p className="mt-0.5 text-sm text-amber-800">{formatEventTiming(item)}</p>
+                    ) : null}
                   </li>
                 ))}
               </ul>

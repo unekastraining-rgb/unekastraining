@@ -28,7 +28,7 @@ export function ElementaryPlanner({ plans = [] }: { plans?: HubGradeSchoolPlan[]
         {nextPlan && nextStep ? (
           <Link
             href={learningStepHref(nextPlan.courseId, 0)}
-            className="mt-4 inline-flex items-center gap-2 rounded-xl bg-teal-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-teal-500"
+            className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-xl bg-teal-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-teal-500 touch-manipulation"
           >
             Start: {nextStep.title}
             <ArrowRight className="h-4 w-4" />

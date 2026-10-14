@@ -9,6 +9,7 @@ export function StudyHaulLoginTruck() {
   const [motionReady, setMotionReady] = useState(false);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync UI state to props or external subscription
     setMotionReady(true);
   }, []);
 

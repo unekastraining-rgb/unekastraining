@@ -14,7 +14,18 @@ export async function GET(
     const quiz = await db.quiz.findFirst({
       where: { id, userId: user.id },
       include: {
-        course: { select: { id: true, title: true, color: true } },
+        course: {
+          select: {
+            id: true,
+            title: true,
+            color: true,
+            topics: {
+              orderBy: { sortOrder: "asc" },
+              take: 24,
+              select: { name: true },
+            },
+          },
+        },
         questions: { orderBy: { sortOrder: "asc" } },
       },
     });
@@ -33,7 +44,14 @@ export async function GET(
         title: quiz.title,
         description: quiz.description,
         difficulty: quiz.difficulty,
-        course: quiz.course,
+        course: quiz.course
+          ? {
+              id: quiz.course.id,
+              title: quiz.course.title,
+              color: quiz.course.color,
+              topics: quiz.course.topics.map((topic) => topic.name),
+            }
+          : null,
         questions: quiz.questions.map((question) => ({
           id: question.id,
           sortOrder: question.sortOrder,

@@ -64,12 +64,16 @@ export function hubAssignmentsHref(): string {
 
 export function hubChatHref(options?: {
   courseId?: string;
+  topic?: string;
   prompt?: string;
 }): string {
   const params = new URLSearchParams();
   params.set("tab", "chat");
   if (options?.courseId) {
     params.set("courseId", options.courseId);
+  }
+  if (options?.topic?.trim()) {
+    params.set("topic", options.topic.trim());
   }
   if (options?.prompt) {
     params.set("prompt", options.prompt);

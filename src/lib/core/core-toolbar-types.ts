@@ -12,6 +12,7 @@ export type CoreToolbarItemId =
   | "stickers"
   | "images"
   | "templates"
+  | "starters"
   | "shapes"
   | "sticky"
   | "laser"
@@ -28,6 +29,10 @@ export type PenMode =
   | "ball"
   | "brush"
   | "pencil"
+  | "colorPencil"
+  | "chalk"
+  | "crayon"
+  | "marker"
   | "highlighter"
   | "tape"
   | "shape";
@@ -115,8 +120,11 @@ export interface CoreToolbarActions {
   onSelectPenMode: (mode: PenMode) => void;
   onSetInkTool: (tool: InkTool) => void;
   onSetShapeKind: (kind: ShapeKind) => void;
-  onAddTextBox: () => void;
+  /** Click Text, then click the page. Pass `{ atTop: true }` (Shift+Text) to place at the top. */
+  onAddTextBox: (options?: { atTop?: boolean }) => void;
   onAddSticky: () => void;
+  /** Insert a canvas decoration (line, border frame, etc.). */
+  onAddDecoration: (kind: import("@/lib/core/note-types").DecorationKind) => void;
   onSelectTool: () => void;
   onGroup: () => void;
   onUngroup: () => void;
@@ -124,6 +132,8 @@ export interface CoreToolbarActions {
   onPaste: () => void;
   onInsertImage: () => void;
   onInsertElements: () => void;
+  /** Open PDF annotate for a material id, or Assist materials if omitted. */
+  onAnnotatePdf: (materialId?: string) => void;
   onStartRecord: () => void;
   onShowRecordings: () => void;
   onClearPage: () => void;

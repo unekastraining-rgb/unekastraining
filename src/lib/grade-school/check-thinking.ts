@@ -16,6 +16,7 @@ export async function evaluateGradeSchoolThinking(input: {
   subject?: string | null;
   mode: "reading" | "writing";
   sampleAnswer?: string | null;
+  includeOpenAIPro?: boolean;
 }): Promise<ThinkingFeedback> {
   const grade = input.gradeLevel?.trim() || "elementary";
   const subject = input.subject?.trim() || "general";
@@ -59,7 +60,7 @@ Rules:
 - Do not repeat the full passage.`,
       },
     ],
-    { temperature: 0.3, maxTokens: 1024, jsonMode: true },
+    { temperature: 0.3, maxTokens: 1024, jsonMode: true, includeOpenAIPro: input.includeOpenAIPro },
   );
 
   const parsed = parseAiJson<ThinkingFeedback>(

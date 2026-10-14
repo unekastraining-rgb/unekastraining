@@ -4,9 +4,11 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { CheckCircle2, ChevronDown, ChevronUp, Plus } from "lucide-react";
 
+import { ContinueLearningButton } from "@/components/study/ContinueLearningButton";
 import { computePriority, isAssignmentCompleted } from "@/lib/academic";
 import { formatGradeLabel } from "@/lib/grades";
 import { coursePath } from "@/lib/courses";
+import { readableCourseTitle } from "@/lib/courses/display-name";
 import { hubScheduleHref } from "@/lib/hub/tabs";
 
 import type { HubAssignment, HubCourse } from "./types";
@@ -54,6 +56,7 @@ export function HubAssignmentsPanel({
   const [addOpen, setAddOpen] = useState(false);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync UI state to props or external subscription
     setAssignments(initialAssignments);
   }, [initialAssignments]);
 
@@ -220,14 +223,16 @@ export function HubAssignmentsPanel({
           <button
             type="button"
             onClick={() => setShowCompleted((value) => !value)}
-            className="rounded-full border border-brand px-3 py-1.5 text-xs font-semibold text-stone-600 transition hover:bg-brand-soft"
+            data-hub-chrome
+            className="inline-flex min-h-11 items-center rounded-full border border-brand px-3 py-1.5 text-xs font-semibold text-stone-600 transition hover:bg-brand-soft touch-manipulation"
           >
             {showCompleted ? "Hide done" : "Show done"}
           </button>
           <button
             type="button"
             onClick={() => setAddOpen((value) => !value)}
-            className="inline-flex items-center gap-1.5 rounded-full btn-primary px-3 py-1.5 text-xs font-semibold text-white transition "
+            data-hub-chrome
+            className="inline-flex min-h-11 items-center gap-1.5 rounded-full btn-primary px-3 py-1.5 text-xs font-semibold text-white transition touch-manipulation"
           >
             <Plus className="h-3.5 w-3.5" />
             Add
@@ -271,7 +276,7 @@ export function HubAssignmentsPanel({
               >
                 {courses.map((course) => (
                   <option key={course.id} value={course.id}>
-                    {course.title}
+                    {readableCourseTitle(course.title, course.code)}
                   </option>
                 ))}
               </select>
@@ -330,7 +335,7 @@ export function HubAssignmentsPanel({
                 <div
                   className={`flex items-center gap-3 rounded-2xl border px-3 py-2.5 transition ${
                     isFocused
-                      ? "border-[color-mix(in_srgb,var(--sh-primary)_45%,transparent)] bg-brand-soft ring-2 ring-[color-mix(in_srgb,var(--sh-primary)_18%,transparent)]"
+                      ? "hub-item-focused bg-brand-soft"
                       : completed
                         ? "border-stone-200 bg-stone-50 opacity-80"
                         : "border-brand hover:border-brand"
@@ -375,6 +380,16 @@ export function HubAssignmentsPanel({
                     <span className="shrink-0 rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-bold text-violet-800">
                       {gradeLabel}
                     </span>
+                  ) : null}
+                  {/* 2P-31/2P-33 — Start/Continue learning when Topic.conceptId linked.
+                      Marking complete / grades never create evidence. */}
+                  {assignment.conceptId ? (
+                    <ContinueLearningButton
+                      conceptId={assignment.conceptId}
+                      assignmentId={assignment.id}
+                      secondaryHint="Study this assignment"
+                      className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl bg-teal-700 px-3 py-2 text-xs font-semibold text-white hover:bg-teal-800 disabled:opacity-60 touch-manipulation"
+                    />
                   ) : null}
                   {completed ? (
                     <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />

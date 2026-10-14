@@ -44,7 +44,7 @@ export function PageTemplateOverlay({ templateId }: { templateId?: PageTemplateI
     );
   }
 
-  if (templateId === "cornell") {
+  if (templateId === "cornell" || templateId === "cornell_ruled" || templateId === "cornell_grid") {
     return (
       <div className="pointer-events-none absolute inset-0 z-[1] grid grid-cols-[1fr_12rem]">
         <div />
@@ -62,6 +62,52 @@ export function PageTemplateOverlay({ templateId }: { templateId?: PageTemplateI
     );
   }
 
+  if (templateId === "three_column") {
+    return (
+      <div className="pointer-events-none absolute inset-0 z-[1]">
+        <div className="absolute bottom-0 left-[33.333%] top-0 w-px bg-stone-200/80" />
+        <div className="absolute bottom-0 left-[66.666%] top-0 w-px bg-stone-200/80" />
+      </div>
+    );
+  }
+
+  if (templateId === "mckinsey") {
+    return (
+      <div className="pointer-events-none absolute inset-0 z-[1] flex flex-col">
+        <div className="border-b border-stone-300/80 px-6 py-4">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400">
+            Action title
+          </p>
+          <div className="mt-2 h-6 border-b border-dashed border-stone-200" />
+        </div>
+        <div className="grid flex-1 grid-cols-2">
+          <div className="border-r border-stone-200/80 px-5 py-4">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400">
+              Situation / complication
+            </p>
+          </div>
+          <div className="px-5 py-4">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400">
+              Insight / so-what
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (templateId === "kanban") {
+    return (
+      <div className="pointer-events-none absolute inset-0 z-[1] grid grid-cols-3">
+        {["To do", "Doing", "Done"].map((label) => (
+          <div key={label} className="border-r border-stone-200/60 px-3 py-3 last:border-r-0">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400">{label}</p>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   return null;
 }
 
@@ -72,8 +118,13 @@ export function templateContentPadding(templateId?: PageTemplateId): string {
     case "meeting_notes":
       return "pt-28";
     case "study_board":
+    case "kanban":
       return "pt-8";
+    case "mckinsey":
+      return "pt-20";
     case "cornell":
+    case "cornell_ruled":
+    case "cornell_grid":
       return "";
     default:
       return "";

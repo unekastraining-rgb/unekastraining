@@ -3,6 +3,8 @@
 import { Send, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
+import { readableCourseTitle } from "@/lib/courses/display-name";
+import { resolveUrlCourseId } from "@/lib/study/resolve-url-course-id";
 import { useTheme } from "@/lib/theme/ThemeProvider";
 
 interface ChatMessage {
@@ -13,6 +15,7 @@ interface ChatMessage {
 interface CourseOption {
   id: string;
   title: string;
+  topics?: string[];
 }
 
 const starterPrompts = [
@@ -37,13 +40,19 @@ export function ChatTab({
   variant?: "full" | "panel";
   courses?: CourseOption[];
   initialCourseId?: string | null;
+  initialTopic?: string | null;
   pendingPrompt?: string | null;
   onPendingPromptConsumed?: () => void;
 }) {
   const { settings } = useTheme();
   const isGradeSchool = settings.elementaryMode;
 
-  const [courseId, setCourseId] = useState(initialCourseId ?? "");
+  const [courseId, setCourseId] = useState(() =>
+    resolveUrlCourseId(
+      initialCourseId,
+      courses.map((course) => course.id),
+    ),
+  );
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: "assistant",
@@ -56,9 +65,12 @@ export function ChatTab({
   const [sending, setSending] = useState(false);
 
   useEffect(() => {
-    if (initialCourseId && courses.some((course) => course.id === initialCourseId)) {
-      setCourseId(initialCourseId);
-    }
+    setCourseId(
+      resolveUrlCourseId(
+        initialCourseId,
+        courses.map((course) => course.id),
+      ),
+    );
   }, [initialCourseId, courses]);
 
   const selectedCourse = useMemo(
@@ -156,7 +168,7 @@ export function ChatTab({
             <option value="">All classes</option>
             {courses.map((course) => (
               <option key={course.id} value={course.id}>
-                {course.title}
+                {readableCourseTitle(course.title)}
               </option>
             ))}
           </select>
@@ -178,13 +190,13 @@ export function ChatTab({
         ))}
       </div>
 
-      <div className="mt-4 flex flex-wrap gap-2">
+      <div className="mt-4 flex flex-wrap gap-2" data-hub-chrome>
         {(isGradeSchool ? gradeSchoolPrompts : starterPrompts).map((prompt) => (
           <button
             key={prompt}
             type="button"
             onClick={() => void sendMessage(prompt)}
-            className="rounded-full border border-brand bg-brand-soft px-4 py-2 text-sm font-medium text-stone-700 transition hover:bg-brand-soft"
+            className="inline-flex min-h-11 items-center rounded-full border border-brand bg-brand-soft px-4 py-2 text-sm font-medium text-stone-700 transition hover:bg-brand-soft touch-manipulation"
           >
             {prompt}
           </button>
@@ -206,12 +218,13 @@ export function ChatTab({
               ? `Ask about ${selectedCourse.title}…`
               : "Ask about classes, deadlines, or study plans..."
           }
-          className="flex-1 rounded-xl border border-brand/80 bg-white/90 px-4 py-3 text-sm text-stone-800 placeholder:text-muted-soft focus:outline-none focus:ring-2 focus:ring-[color-mix(in_srgb,var(--sh-primary)_25%,transparent)] md:text-base"
+          className="input-brand hub-input-focus-ring flex-1 rounded-xl border border-brand/80 bg-white/90 px-4 py-3 text-sm text-stone-800 placeholder:text-muted-soft md:text-base"
         />
         <button
           type="submit"
           disabled={sending || !input.trim()}
-          className="rounded-xl btn-primary px-5 text-white transition  disabled:opacity-50"
+          data-hub-chrome
+          className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl btn-primary px-5 text-white transition disabled:opacity-50 touch-manipulation"
         >
           <Send className="h-5 w-5" />
         </button>

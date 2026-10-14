@@ -16,6 +16,8 @@ export function ResourceCard({
   onOpen,
   onEdit,
   onDelete,
+  selected,
+  onToggleSelect,
 }: {
   resource: ResourceRecord;
   settings: ResourcesLibrarySettings;
@@ -23,12 +25,31 @@ export function ResourceCard({
   onOpen: (resource: ResourceRecord) => void;
   onEdit: (resource: ResourceRecord) => void;
   onDelete: (resource: ResourceRecord) => void;
+  selected?: boolean;
+  onToggleSelect?: (resource: ResourceRecord) => void;
 }) {
   const accent = resource.accentColor ?? settings.accentColor ?? "var(--sh-primary)";
+  const selectControl = onToggleSelect ? (
+    <input
+      type="checkbox"
+      className="h-4 w-4 accent-[var(--sh-primary,#ea580c)]"
+      checked={Boolean(selected)}
+      onChange={() => onToggleSelect(resource)}
+      aria-label={`Select ${resource.title}`}
+      onClick={(e) => e.stopPropagation()}
+    />
+  ) : null;
 
   if (layout === "list") {
     return (
-      <div className="card-elevated flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
+      <div
+        className={`card-elevated flex flex-col gap-3 p-4 sm:flex-row sm:items-center ${
+          selected ? "ring-2 ring-[var(--sh-primary,#ea580c)]" : ""
+        }`}
+      >
+        {selectControl ? (
+          <div className="flex min-h-11 items-center">{selectControl}</div>
+        ) : null}
         {settings.showIcons ? (
           <div
             className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border"
@@ -83,23 +104,32 @@ export function ResourceCard({
   }
 
   return (
-    <div className="card-elevated flex h-full flex-col p-5">
+    <div
+      className={`card-elevated flex h-full flex-col p-5 ${
+        selected ? "ring-2 ring-[var(--sh-primary,#ea580c)]" : ""
+      }`}
+    >
       <div className="flex items-start justify-between gap-3">
-        {settings.showIcons ? (
-          <div
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border"
-            style={{
-              background: "var(--sh-chip)",
-              borderColor: "var(--sh-chip-border)",
-              color: resource.accentColor ? accent : "var(--sh-primary)",
-              ...(resource.accentColor
-                ? { backgroundColor: `${accent}18`, borderColor: `${accent}33` }
-                : {}),
-            }}
-          >
-            <ResourceIcon icon={resource.icon} className="h-5 w-5" />
-          </div>
-        ) : null}
+        <div className="flex items-start gap-2">
+          {selectControl ? (
+            <div className="flex min-h-11 items-center pt-1">{selectControl}</div>
+          ) : null}
+          {settings.showIcons ? (
+            <div
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border"
+              style={{
+                background: "var(--sh-chip)",
+                borderColor: "var(--sh-chip-border)",
+                color: resource.accentColor ? accent : "var(--sh-primary)",
+                ...(resource.accentColor
+                  ? { backgroundColor: `${accent}18`, borderColor: `${accent}33` }
+                  : {}),
+              }}
+            >
+              <ResourceIcon icon={resource.icon} className="h-5 w-5" />
+            </div>
+          ) : null}
+        </div>
         <div className="ml-auto flex gap-1">
           <button
             type="button"

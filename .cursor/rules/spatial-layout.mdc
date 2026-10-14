@@ -1,0 +1,49 @@
+---
+description: Global UX spatial layout — never default to centered single-column app screens
+alwaysApply: true
+---
+
+# Study Haul — Global UX Spatial Layout
+
+## Rule
+
+**Never default to a centered single-column webpage.** Every screen must choose a layout based on its task. Desktop/iPad space should be used intentionally for rails, canvases, split panes, tool areas, timelines, dashboards, or contextual panels.
+
+A single-column layout is only appropriate when focused reading/writing/attention genuinely calls for it.
+
+## Do not
+
+- Center everything in `max-w-3xl` / `max-w-4xl` / `max-w-6xl mx-auto` stacks by default
+- Stretch a phone layout onto desktop
+- Force three columns onto phone/portrait
+- Fill empty space with decorative cards or filler text
+- Dump primary interactions into a side questionnaire while the main stage is only reading
+- Redesign working functionality destructively (preserve buttons, navigation, undo, existing interactions)
+
+## Do
+
+- Ask: what is the job of this screen, and what spatial arrangement makes that job easiest?
+- Prefer: split-pane, three-zone, sidebar + canvas, dashboard/bento, canvas + inspector, curriculum + stage, timeline, workspace
+- Keep reading/writing measure comfortable **inside** a larger application frame
+- Collapse rails to drawers on phone/portrait; keep writing/canvas primary
+- Use panels for navigation, structure, tools, progress, references — not to dump content
+
+## Product feel
+
+| Surface | Feel like |
+|---------|-----------|
+| Core | canvas / notebook / workspace |
+| Learning Studio | classroom / interactive learning |
+| Haul | writing studio / structured writing workspace |
+| Lucky | focused retention / quiz |
+| Planner | planning / scheduling workspace |
+| Dashboard | overview / command center |
+
+## Haul writing
+
+Desktop/iPad landscape should support structure rail + writing canvas + contextual tools. Portrait: canvas primary, structure/tools as drawers. Writing itself remains the dominant area. Proposal UX stays in the writing stage (learner controls replace/insert/copy).
+
+## Before shipping UI
+
+1. If given another 800px of width, does the layout know what to do with it?
+2. Can you tell the purpose from spatial organization before reading all labels?

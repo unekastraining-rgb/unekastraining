@@ -27,7 +27,11 @@ export function DesktopNotificationWatcher({
 }: {
   enabled: boolean;
 }) {
-  const seenRef = useRef<Set<string>>(readSeen());
+  const seenRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    seenRef.current = readSeen();
+  }, []);
 
   useEffect(() => {
     if (!enabled || typeof window === "undefined" || !("Notification" in window)) {

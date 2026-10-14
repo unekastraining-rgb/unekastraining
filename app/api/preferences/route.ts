@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { getFreeAIProviderStatus } from "@/lib/ai/config";
 import {
   getOrCreateUserPreferences,
   updateUserPreferences,
@@ -18,7 +19,12 @@ export async function GET() {
       getOrCreateUserPreferences(user.id),
       getUserAppSettings(user.id),
     ]);
-    return NextResponse.json({ success: true, preferences, appSettings });
+    return NextResponse.json({
+      success: true,
+      preferences,
+      appSettings,
+      aiProviders: getFreeAIProviderStatus(),
+    });
   } catch (error) {
     console.error("Failed to load preferences:", error);
     return NextResponse.json(
@@ -55,6 +61,9 @@ export async function PATCH(request: Request) {
     if (body.aiSourceMode !== undefined) appPatch.aiSourceMode = body.aiSourceMode;
     if (body.aiUseCourseMaterialsInChat !== undefined) {
       appPatch.aiUseCourseMaterialsInChat = body.aiUseCourseMaterialsInChat;
+    }
+    if (body.aiUseOpenAIPro !== undefined) {
+      appPatch.aiUseOpenAIPro = Boolean(body.aiUseOpenAIPro);
     }
     if (body.desktopNotifications !== undefined) {
       appPatch.desktopNotifications = body.desktopNotifications;

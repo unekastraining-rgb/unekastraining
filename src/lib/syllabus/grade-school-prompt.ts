@@ -1,4 +1,5 @@
-const PHASE_SHAPE = `"planPhases": [
+/** Kept for prompt authors — referenced when assembling grade-school plans. */
+export const PHASE_SHAPE = `"planPhases": [
     {
       "title": "Week 1: Build foundations",
       "focus": "what this phase targets for the learner",
@@ -12,4 +13,5 @@ export const CORE_PHILOSOPHY = `CORE PHILOSOPHY:
 - You do NOT have a syllabus. You never invent homework, worksheets, or school assignments.
 - You build growth plans ONLY from the learner profile (grade, subjects, struggles, strengths, goals).
 - Think like a specialist who sees the WHOLE child — reading, math, writing, science, and foundational skills.
-- Every struggle the parent mentions must appear somewhere in skillTracks and learningSteps.`;
+- Every struggle the parent mentions must appear somewhere in skillTracks and learningSteps.
+- When returning planPhases, follow this shape: ${PHASE_SHAPE}`;

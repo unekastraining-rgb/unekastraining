@@ -1,4 +1,4 @@
-import { AssignmentKind, AssignmentStatus, LMSProvider } from "@/generated/prisma";
+import { AssignmentKind, AssignmentStatus, LMSProvider, MaterialType } from "@/generated/prisma";
 import { db } from "@/lib/db";
 import {
   fetchBlackboardGradebookColumns,
@@ -17,11 +17,29 @@ import { collectMoodleCoursesForImport } from "@/lib/lms/moodle-collect";
 import { resolveMoodleCredentials } from "@/lib/lms/moodle-env";
 import { importMoodleCourses } from "@/lib/lms/moodle-import";
 import { normalizeMoodleBaseUrl } from "@/lib/lms/moodle-url";
+import { enrichCourseFromSyllabus, seedTopicsFromSyllabusOutline } from "@/lib/syllabus/enrich-course-from-syllabus";
+import { buildCanvasColdStartSyllabusText, canvasSyllabusMaterialMeta, formatCanvasModuleOutline } from "@/lib/lms/canvas-cold-start";
+import {
+  blackboardSyllabusMaterialMeta,
+  buildBlackboardColdStartText,
+} from "@/lib/lms/blackboard-cold-start";
+import {
+  buildGoogleClassroomColdStartText,
+  googleClassroomSyllabusMaterialMeta,
+} from "@/lib/lms/google-classroom-cold-start";
+import { upsertLmsSyllabusMaterial } from "@/lib/lms/upsert-lms-syllabus-material";
+import { formatColdStartSyncMessage } from "@/lib/lms/cold-start-sync-message";
+import { lmsColdStartCourseEntry } from "@/lib/lms/cold-start-course-entry";
+import { buildDemoCanvasSyllabus, demoColdStartCourseEntry } from "@/lib/lms/demo-cold-start";
+import { openLmsToken } from "@/lib/security/lms-token-crypto";
+
+export { formatColdStartSyncMessage } from "@/lib/lms/cold-start-sync-message";
 
 export interface CanvasCourse {
   id: number;
   name: string;
   course_code?: string;
+  syllabus_body?: string | null;
 }
 
 export interface CanvasAssignment {
@@ -46,7 +64,7 @@ export async function fetchCanvasCourses(
   baseUrl: string,
   accessToken: string,
 ): Promise<CanvasCourse[]> {
-  const url = `${normalizeBaseUrl(baseUrl)}/api/v1/courses?enrollment_state=active&per_page=50`;
+  const url = `${normalizeBaseUrl(baseUrl)}/api/v1/courses?enrollment_state=active&include[]=syllabus_body&per_page=50`;
   const response = await fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
     cache: "no-store",
@@ -58,6 +76,23 @@ export async function fetchCanvasCourses(
 
   const data = (await response.json()) as CanvasCourse[];
   return data.filter((course) => course.name && !course.name.startsWith("Sandbox"));
+}
+
+/** Module names as a cold-start outline when syllabus_body is empty. */
+export async function fetchCanvasModuleOutline(
+  baseUrl: string,
+  accessToken: string,
+  courseId: number,
+): Promise<string> {
+  const url = `${normalizeBaseUrl(baseUrl)}/api/v1/courses/${courseId}/modules?per_page=50`;
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    cache: "no-store",
+  });
+  if (!response.ok) return "";
+
+  const modules = (await response.json()) as Array<{ name?: string; position?: number }>;
+  return formatCanvasModuleOutline(modules);
 }
 
 export async function fetchCanvasAssignments(
@@ -117,6 +152,12 @@ export interface LmsSyncStats {
   meetingsImported: number;
   message: string;
   usedDemo: boolean;
+  /** Demo/LMS cold start: course ids + first syllabus topic for Core→Six→Lucky links. */
+  coldStartCourses?: Array<{
+    id: string;
+    title: string;
+    focusTopic: string | null;
+  }>;
 }
 
 export async function syncCanvasConnection(
@@ -129,6 +170,10 @@ export async function syncCanvasConnection(
   let assignmentsImported = 0;
   let gradesUpdated = 0;
   let meetingsImported = 0;
+  let syllabiImported = 0;
+  let topicsCreated = 0;
+  const coldStartCourseTitles: string[] = [];
+  const coldStartCourses: NonNullable<LmsSyncStats["coldStartCourses"]> = [];
 
   for (const canvasCourse of canvasCourses) {
     let course = await db.course.findFirst({
@@ -214,7 +259,70 @@ export async function syncCanvasConnection(
       canvasCourse.id,
     );
     meetingsImported += await upsertClassMeetings(course.id, meetingSlots);
+
+    // Cold start: syllabus body and/or module outline → SYLLABUS material + topics
+    let modulesOutline = "";
+    const thinSyllabus =
+      !(canvasCourse.syllabus_body?.trim()) ||
+      buildCanvasColdStartSyllabusText({
+        courseName: canvasCourse.name,
+        syllabusHtml: canvasCourse.syllabus_body,
+      }).text.length < 80;
+
+    if (thinSyllabus) {
+      modulesOutline = await fetchCanvasModuleOutline(
+        baseUrl,
+        accessToken,
+        canvasCourse.id,
+      );
+    }
+
+    const coldStart = buildCanvasColdStartSyllabusText({
+      courseName: canvasCourse.name,
+      syllabusHtml: canvasCourse.syllabus_body,
+      modulesOutline,
+    });
+
+    if (coldStart.seeded) {
+      const syllabusText = coldStart.text;
+      const { title: syllabusTitle, url: syllabusUrl } = canvasSyllabusMaterialMeta({
+        baseUrl,
+        courseId: canvasCourse.id,
+        courseName: canvasCourse.name,
+        courseCode: canvasCourse.course_code ?? null,
+      });
+      const upserted = await upsertLmsSyllabusMaterial({
+        courseId: course.id,
+        title: syllabusTitle,
+        url: syllabusUrl,
+        extractedText: syllabusText,
+      });
+      if (upserted === "created") syllabiImported += 1;
+
+      topicsCreated += await enrichTopicsFromLmsSyllabus({
+        userId,
+        courseId: course.id,
+        syllabusText,
+        courseTitle: canvasCourse.name,
+        courseCode: canvasCourse.course_code ?? null,
+        label: "Canvas",
+      });
+
+      const fromSyllabus = parseMeetingScheduleFromText(syllabusText);
+      meetingsImported += await upsertClassMeetings(course.id, fromSyllabus);
+      coldStartCourseTitles.push(canvasCourse.name);
+      coldStartCourses.push(
+        lmsColdStartCourseEntry(course.id, canvasCourse.name, syllabusText),
+      );
+    }
   }
+
+  const baseMessage = formatSyncMessage(
+    "Canvas",
+    canvasCourses.length,
+    assignmentsImported,
+    meetingsImported,
+  );
 
   return {
     provider: "CANVAS",
@@ -224,12 +332,12 @@ export async function syncCanvasConnection(
     gradesUpdated,
     meetingsImported,
     usedDemo: false,
-    message: formatSyncMessage(
-      "Canvas",
-      canvasCourses.length,
-      assignmentsImported,
-      meetingsImported,
-    ),
+    coldStartCourses: coldStartCourses.length > 0 ? coldStartCourses : undefined,
+    message: formatColdStartSyncMessage(baseMessage, {
+      syllabiImported,
+      topicsCreated,
+      courseTitles: coldStartCourseTitles,
+    }),
   };
 }
 
@@ -246,6 +354,13 @@ interface GoogleCourseWork {
   description?: string;
   dueDate?: { year: number; month: number; day: number };
   dueTime?: { hours: number; minutes: number };
+  materials?: Array<{
+    link?: { url?: string | null; title?: string | null } | null;
+    youtubeVideo?: { alternateLink?: string | null; title?: string | null } | null;
+    driveFile?: {
+      driveFile?: { title?: string | null; alternateLink?: string | null } | null;
+    } | null;
+  }>;
 }
 
 export async function syncGoogleClassroomConnection(
@@ -270,6 +385,10 @@ export async function syncGoogleClassroomConnection(
   let assignmentsImported = 0;
   let gradesUpdated = 0;
   let meetingsImported = 0;
+  let syllabiImported = 0;
+  let topicsCreated = 0;
+  const coldStartCourseTitles: string[] = [];
+  const coldStartCourses: NonNullable<LmsSyncStats["coldStartCourses"]> = [];
 
   for (const googleCourse of googleCourses) {
     let course = await db.course.findFirst({
@@ -294,13 +413,12 @@ export async function syncGoogleClassroomConnection(
       { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" },
     );
 
-    if (!workResponse.ok) continue;
+    const courseWork: GoogleCourseWork[] = workResponse.ok
+      ? (((await workResponse.json()) as { courseWork?: GoogleCourseWork[] })
+          .courseWork ?? [])
+      : [];
 
-    const workPayload = (await workResponse.json()) as {
-      courseWork?: GoogleCourseWork[];
-    };
-
-    for (const work of workPayload.courseWork ?? []) {
+    for (const work of courseWork) {
       let dueDate: Date | null = null;
       if (work.dueDate) {
         dueDate = new Date(
@@ -377,7 +495,56 @@ export async function syncGoogleClassroomConnection(
       const meetingSlots = parseMeetingScheduleFromText(googleCourse.description);
       meetingsImported += await upsertClassMeetings(course.id, meetingSlots);
     }
+
+    // Cold start: description + coursework outline → CourseMaterial + topics
+    const coldStart = buildGoogleClassroomColdStartText({
+      courseName: googleCourse.name,
+      section: googleCourse.section,
+      description: googleCourse.description,
+      courseWork,
+    });
+
+    if (coldStart.seeded) {
+      const { title: syllabusTitle, url: syllabusUrl } =
+        googleClassroomSyllabusMaterialMeta({
+          googleCourseId: googleCourse.id,
+          courseName: googleCourse.name,
+          section: googleCourse.section,
+        });
+      const upserted = await upsertLmsSyllabusMaterial({
+        courseId: course.id,
+        title: syllabusTitle,
+        url: syllabusUrl,
+        extractedText: coldStart.text,
+      });
+      if (upserted === "created") syllabiImported += 1;
+
+      topicsCreated += await enrichTopicsFromLmsSyllabus({
+        userId,
+        courseId: course.id,
+        syllabusText: coldStart.text,
+        courseTitle: googleCourse.name,
+        courseCode: googleCourse.section ?? null,
+        label: "Google Classroom",
+      });
+
+      coldStartCourseTitles.push(googleCourse.name);
+      coldStartCourses.push(
+        lmsColdStartCourseEntry(course.id, googleCourse.name, coldStart.text),
+      );
+    }
   }
+
+  const baseMessage =
+    formatSyncMessage(
+      "Google Classroom",
+      googleCourses.length,
+      assignmentsImported,
+      meetingsImported,
+    ) +
+    (gradesUpdated > 0
+      ? ` Updated ${gradesUpdated} grade${gradesUpdated === 1 ? "" : "s"}.`
+      : "");
 
   return {
     provider: "GOOGLE_CLASSROOM",
@@ -387,12 +554,12 @@ export async function syncGoogleClassroomConnection(
     gradesUpdated,
     meetingsImported,
     usedDemo: false,
-    message: formatSyncMessage(
-      "Google Classroom",
-      googleCourses.length,
-      assignmentsImported,
-      meetingsImported,
-    ) + (gradesUpdated > 0 ? ` Updated ${gradesUpdated} grade${gradesUpdated === 1 ? "" : "s"}.` : ""),
+    coldStartCourses: coldStartCourses.length > 0 ? coldStartCourses : undefined,
+    message: formatColdStartSyncMessage(baseMessage, {
+      syllabiImported,
+      topicsCreated,
+      courseTitles: coldStartCourseTitles,
+    }),
   };
 }
 
@@ -402,13 +569,15 @@ export async function syncDemoLmsData(
 ): Promise<LmsSyncStats> {
   const demoCourses: Array<{
     title: string;
-    code: string;
+    code: "CS201" | "ENG110";
+    syllabusText: string;
     assignments: Array<{ title: string; days: number }>;
     meetings: ClassMeetingInput[];
   }> = [
     {
       title: "CS 201 — Data Structures",
       code: "CS201",
+      syllabusText: buildDemoCanvasSyllabus("CS201"),
       assignments: [
         { title: "Lab 4: Binary Search Trees", days: 5 },
         { title: "Midterm Review Quiz", days: 10 },
@@ -421,6 +590,7 @@ export async function syncDemoLmsData(
     {
       title: "ENG 110 — Composition",
       code: "ENG110",
+      syllabusText: buildDemoCanvasSyllabus("ENG110"),
       assignments: [{ title: "Essay Draft 2", days: 7 }],
       meetings: [
         { dayOfWeek: 2, startTime: "13:00", endTime: "14:30", title: "Seminar" },
@@ -432,6 +602,11 @@ export async function syncDemoLmsData(
   let coursesCreated = 0;
   let assignmentsImported = 0;
   let meetingsImported = 0;
+  let syllabiImported = 0;
+  let topicsCreated = 0;
+  const coldStartCourseTitles: string[] = [];
+  const coldStartCourses: Array<{ id: string; title: string; focusTopic: string | null }> =
+    [];
 
   for (const demo of demoCourses) {
     let course = await db.course.findFirst({
@@ -471,7 +646,58 @@ export async function syncDemoLmsData(
     }
 
     meetingsImported += await upsertClassMeetings(course.id, demo.meetings);
+
+    // Cold start: syllabus material + topics so Blurt / Study from topics work without uploads.
+    const syllabusTitle = `${demo.code} Syllabus (demo)`;
+    const existingSyllabus = await db.courseMaterial.findFirst({
+      where: { courseId: course.id, title: syllabusTitle },
+      select: { id: true },
+    });
+    if (!existingSyllabus) {
+      await db.courseMaterial.create({
+        data: {
+          courseId: course.id,
+          title: syllabusTitle,
+          type: MaterialType.SYLLABUS,
+          extractedText: demo.syllabusText,
+          sortOrder: 0,
+        },
+      });
+      syllabiImported += 1;
+    } else {
+      await db.courseMaterial.update({
+        where: { id: existingSyllabus.id },
+        data: { extractedText: demo.syllabusText, type: MaterialType.SYLLABUS },
+      });
+    }
+
+    try {
+      const enriched = await enrichCourseFromSyllabus({
+        userId,
+        courseId: course.id,
+        syllabusText: demo.syllabusText,
+        courseTitle: demo.title,
+        courseCode: demo.code,
+        force: true,
+      });
+      topicsCreated += enriched.topicsCreated;
+      if (enriched.topicsCreated === 0) {
+        topicsCreated += await seedTopicsFromSyllabusOutline(course.id, demo.syllabusText);
+      }
+    } catch (error) {
+      console.warn("Demo syllabus topic enrich failed:", error);
+      try {
+        topicsCreated += await seedTopicsFromSyllabusOutline(course.id, demo.syllabusText);
+      } catch (seedError) {
+        console.warn("Demo syllabus outline topic seed failed:", seedError);
+      }
+    }
+
+    coldStartCourseTitles.push(demo.title);
+    coldStartCourses.push(demoColdStartCourseEntry(course.id, demo.title, demo.code));
   }
+
+  const demoBase = `Demo sync (${provider}): added ${assignmentsImported} assignment${assignmentsImported === 1 ? "" : "s"}, ${meetingsImported} meeting${meetingsImported === 1 ? "" : "s"}`;
 
   return {
     provider,
@@ -481,7 +707,15 @@ export async function syncDemoLmsData(
     gradesUpdated: 0,
     meetingsImported,
     usedDemo: true,
-    message: `Demo sync: added ${assignmentsImported} assignment${assignmentsImported === 1 ? "" : "s"} and ${meetingsImported} class meeting${meetingsImported === 1 ? "" : "s"} from ${provider}. Connect a real LMS URL + token for live import.`,
+    coldStartCourses,
+    message:
+      coldStartCourseTitles.length > 0
+        ? `${formatColdStartSyncMessage(`${demoBase}.`, {
+            syllabiImported,
+            topicsCreated,
+            courseTitles: coldStartCourseTitles,
+          })} Connect a real LMS URL + token for live import.`
+        : `${demoBase}. Connect a real LMS URL + token for live import.`,
   };
 }
 
@@ -525,6 +759,10 @@ export async function syncBlackboardConnection(
   let assignmentsImported = 0;
   let gradesUpdated = 0;
   let meetingsImported = 0;
+  let syllabiImported = 0;
+  let topicsCreated = 0;
+  const coldStartCourseTitles: string[] = [];
+  const coldStartCourses: NonNullable<LmsSyncStats["coldStartCourses"]> = [];
 
   for (const bbCourse of bbCourses) {
     const courseKey = bbCourse.courseId ?? bbCourse.id;
@@ -616,7 +854,56 @@ export async function syncBlackboardConnection(
       courseKey,
     );
     meetingsImported += await upsertClassMeetings(course.id, meetingSlots);
+
+    // Cold start: gradebook columns + meetings → CourseMaterial + topics
+    const coldStart = buildBlackboardColdStartText({
+      courseName: bbCourse.name,
+      courseKey,
+      columns,
+      meetings: meetingSlots,
+    });
+
+    if (coldStart.seeded) {
+      const { title: syllabusTitle, url: syllabusUrl } =
+        blackboardSyllabusMaterialMeta({
+          baseUrl,
+          courseKey,
+          courseName: bbCourse.name,
+        });
+      const upserted = await upsertLmsSyllabusMaterial({
+        courseId: course.id,
+        title: syllabusTitle,
+        url: syllabusUrl,
+        extractedText: coldStart.text,
+      });
+      if (upserted === "created") syllabiImported += 1;
+
+      topicsCreated += await enrichTopicsFromLmsSyllabus({
+        userId,
+        courseId: course.id,
+        syllabusText: coldStart.text,
+        courseTitle: bbCourse.name,
+        courseCode: courseKey,
+        label: "Blackboard",
+      });
+
+      coldStartCourseTitles.push(bbCourse.name);
+      coldStartCourses.push(
+        lmsColdStartCourseEntry(course.id, bbCourse.name, coldStart.text),
+      );
+    }
   }
+
+  const baseMessage =
+    formatSyncMessage(
+      "Blackboard",
+      bbCourses.length,
+      assignmentsImported,
+      meetingsImported,
+    ) +
+    (gradesUpdated > 0
+      ? ` Updated ${gradesUpdated} grade${gradesUpdated === 1 ? "" : "s"}.`
+      : "");
 
   return {
     provider: "BLACKBOARD",
@@ -626,10 +913,52 @@ export async function syncBlackboardConnection(
     gradesUpdated,
     meetingsImported,
     usedDemo: false,
-    message:
-      formatSyncMessage("Blackboard", bbCourses.length, assignmentsImported, meetingsImported) +
-      (gradesUpdated > 0 ? ` Updated ${gradesUpdated} grade${gradesUpdated === 1 ? "" : "s"}.` : ""),
+    coldStartCourses: coldStartCourses.length > 0 ? coldStartCourses : undefined,
+    message: formatColdStartSyncMessage(baseMessage, {
+      syllabiImported,
+      topicsCreated,
+      courseTitles: coldStartCourseTitles,
+    }),
   };
+}
+
+/** Shared topic enrichment used by Canvas / Google Classroom / Blackboard cold start. */
+async function enrichTopicsFromLmsSyllabus(input: {
+  userId: string;
+  courseId: string;
+  syllabusText: string;
+  courseTitle: string;
+  courseCode?: string | null;
+  label: string;
+}): Promise<number> {
+  let topicsCreated = 0;
+  try {
+    const enriched = await enrichCourseFromSyllabus({
+      userId: input.userId,
+      courseId: input.courseId,
+      syllabusText: input.syllabusText,
+      courseTitle: input.courseTitle,
+      courseCode: input.courseCode ?? null,
+    });
+    topicsCreated += enriched.topicsCreated;
+    if (enriched.topicsCreated === 0) {
+      topicsCreated += await seedTopicsFromSyllabusOutline(
+        input.courseId,
+        input.syllabusText,
+      );
+    }
+  } catch (error) {
+    console.warn(`${input.label} syllabus topic enrich failed:`, error);
+    try {
+      topicsCreated += await seedTopicsFromSyllabusOutline(
+        input.courseId,
+        input.syllabusText,
+      );
+    } catch (seedError) {
+      console.warn(`${input.label} syllabus outline topic seed failed:`, seedError);
+    }
+  }
+  return topicsCreated;
 }
 
 function appendGradeNote(description: string | null | undefined, letter: string) {
@@ -657,7 +986,21 @@ export async function syncUserLmsProvider(
 ): Promise<LmsSyncStats> {
   const useDemo = options?.demo === true;
 
-  if (!useDemo && provider === LMSProvider.MOODLE) {
+  if (useDemo) {
+    const result = await syncDemoLmsData(userId, provider);
+    const connection = await db.lMSConnection.findFirst({
+      where: { userId, provider },
+    });
+    if (connection) {
+      await db.lMSConnection.update({
+        where: { id: connection.id },
+        data: { lastSyncedAt: new Date() },
+      });
+    }
+    return result;
+  }
+
+  if (provider === LMSProvider.MOODLE) {
     const credentials = await resolveMoodleCredentials(userId);
     if (!credentials) {
       throw new Error(
@@ -692,58 +1035,55 @@ export async function syncUserLmsProvider(
     throw new Error("Connect your LMS first (URL + access token).");
   }
 
+  const accessToken = openLmsToken(connection.accessToken);
+  if (!accessToken) {
+    throw new Error("Connect your LMS first (URL + access token).");
+  }
+
   let result: LmsSyncStats;
 
   if (
-    !useDemo &&
     provider === LMSProvider.CANVAS &&
     connection.baseUrl &&
-    connection.accessToken
+    accessToken
   ) {
     try {
       result = await syncCanvasConnection(
         userId,
         connection.baseUrl,
-        connection.accessToken,
+        accessToken,
       );
     } catch (error) {
       console.warn("Canvas sync failed:", error);
       throw error instanceof Error ? error : new Error("Canvas sync failed.");
     }
   } else if (
-    !useDemo &&
     provider === LMSProvider.GOOGLE_CLASSROOM &&
-    connection.accessToken
+    accessToken
   ) {
     try {
-      result = await syncGoogleClassroomConnection(userId, connection.accessToken);
+      result = await syncGoogleClassroomConnection(userId, accessToken);
     } catch (error) {
       console.warn("Google Classroom sync failed:", error);
       throw error instanceof Error ? error : new Error("Google Classroom sync failed.");
     }
   } else if (
-    !useDemo &&
     provider === LMSProvider.BLACKBOARD &&
     connection.baseUrl &&
-    connection.accessToken
+    accessToken
   ) {
     try {
       result = await syncBlackboardConnection(
         userId,
         connection.baseUrl,
-        connection.accessToken,
+        accessToken,
       );
     } catch (error) {
       console.warn("Blackboard sync failed:", error);
       throw error instanceof Error ? error : new Error("Blackboard sync failed.");
     }
-  } else if (
-    useDemo &&
-    provider === LMSProvider.MOODLE
-  ) {
-    result = await syncDemoLmsData(userId, provider);
   } else {
-    result = await syncDemoLmsData(userId, provider);
+    throw new Error(`Unsupported LMS provider: ${provider}`);
   }
 
   await db.lMSConnection.update({

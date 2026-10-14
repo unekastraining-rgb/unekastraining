@@ -1,12 +1,19 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { Loader2, Play, Sparkles } from "lucide-react";
+
+import { StudyLoopStrip } from "@/components/study/StudyLoopStrip";
+import { luckyQuizHref, sixChunkingHref } from "@/lib/study/loop-hrefs";
+import { resolveLoopFocusTopic } from "@/lib/study/resolve-loop-focus-topic";
+import { resolveUrlCourseId } from "@/lib/study/resolve-url-course-id";
 
 interface CourseOption {
   id: string;
   title: string;
+  topics?: string[];
 }
 
 interface Problem {
@@ -30,18 +37,34 @@ export function CodePracticeWorkspace({
 }: {
   initialCourses: CourseOption[];
 }) {
+  const searchParams = useSearchParams();
+  const urlTopic = searchParams.get("topic")?.trim() || null;
   const [courses] = useState(initialCourses);
+  const courseIds = useMemo(() => courses.map((course) => course.id), [courses]);
   const [problems, setProblems] = useState<Problem[]>([]);
   const [language, setLanguage] = useState("javascript");
-  const [courseId, setCourseId] = useState(courses[0]?.id ?? "");
+  const [courseId, setCourseId] = useState(() =>
+    resolveUrlCourseId(searchParams.get("courseId"), courseIds),
+  );
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<CodeEvaluation | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const sessionStart = useRef(Date.now());
+  const sessionStart = useRef<number | null>(null);
 
   const activeProblem =
     problems.find((problem) => problem.language === language) ?? problems[0];
+
+  const selectedCourse = useMemo(
+    () => courses.find((course) => course.id === courseId),
+    [courses, courseId],
+  );
+  const focusTopic = resolveLoopFocusTopic(urlTopic, selectedCourse?.topics ?? []);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync UI state to props or external subscription
+    setCourseId(resolveUrlCourseId(searchParams.get("courseId"), courseIds));
+  }, [searchParams, courseIds]);
 
   useEffect(() => {
     void fetch("/api/study/code-evaluate")
@@ -56,6 +79,7 @@ export function CodePracticeWorkspace({
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync UI state to props or external subscription
     if (activeProblem) setCode(activeProblem.starter);
     setResult(null);
   }, [language, activeProblem?.language]);
@@ -80,7 +104,9 @@ export function CodePracticeWorkspace({
           problemPrompt: activeProblem?.prompt,
           durationSeconds: Math.max(
             120,
-            Math.round((Date.now() - sessionStart.current) / 1000),
+            Math.round(
+              (Date.now() - (sessionStart.current ??= Date.now())) / 1000,
+            ),
           ),
         }),
       });
@@ -106,6 +132,15 @@ export function CodePracticeWorkspace({
         </p>
       </div>
 
+      {courseId && selectedCourse ? (
+        <StudyLoopStrip
+          courseId={courseId}
+          courseTitle={selectedCourse.title}
+          topics={selectedCourse.topics ?? []}
+          focusTopic={focusTopic}
+        />
+      ) : null}
+
       <div className="grid gap-4 md:grid-cols-[1fr_16rem]">
         <div className="space-y-4">
           <div className="rounded-2xl border border-orange-100 bg-white p-5">
@@ -129,7 +164,7 @@ export function CodePracticeWorkspace({
             type="button"
             onClick={() => void evaluate()}
             disabled={loading}
-            className="inline-flex items-center gap-2 rounded-xl bg-amber-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-amber-500 disabled:opacity-60"
+            className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-amber-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-amber-500 disabled:opacity-60 touch-manipulation"
           >
             {loading ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -183,8 +218,8 @@ export function CodePracticeWorkspace({
           </div>
 
           <Link
-            href="/quizzes"
-            className="flex items-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 text-sm font-semibold text-violet-800 hover:bg-violet-100"
+            href={luckyQuizHref(courseId || null, null, selectedCourse?.topics?.[0] ?? null)}
+            className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 text-sm font-semibold text-violet-800 hover:bg-violet-100 touch-manipulation"
           >
             <Play className="h-4 w-4" /> Practice quiz instead
           </Link>
@@ -207,6 +242,39 @@ export function CodePracticeWorkspace({
           ) : null}
           {result.improvements.length > 0 ? (
             <ListBlock title="Improvements" items={result.improvements} />
+          ) : null}
+          {courseId && selectedCourse ? (
+            <div
+              data-hub-chrome
+              className="rounded-2xl border border-violet-200 bg-white p-4"
+            >
+              <p className="text-sm font-bold text-stone-900">Keep the loop going</p>
+              <p className="mt-1 text-sm text-stone-600">
+                Drill application gaps in Lucky or re-chunk the concept in Six.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Link
+                  href={luckyQuizHref(
+                    courseId,
+                    null,
+                    selectedCourse.topics?.[0] ?? activeProblem?.title ?? null,
+                  )}
+                  className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-violet-500 touch-manipulation"
+                >
+                  <Play className="h-4 w-4" />
+                  Lucky quiz
+                </Link>
+                <Link
+                  href={sixChunkingHref(
+                    courseId,
+                    selectedCourse.topics?.[0] ?? activeProblem?.title ?? "notes",
+                  )}
+                  className="inline-flex min-h-11 items-center rounded-xl border border-teal-300 bg-teal-50 px-4 py-2.5 text-sm font-bold text-teal-900 hover:bg-teal-100 touch-manipulation"
+                >
+                  Six chunking
+                </Link>
+              </div>
+            </div>
           ) : null}
         </div>
       ) : null}

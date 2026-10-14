@@ -12,13 +12,16 @@ export function CanvasStartersPanel({
   onApply,
   title = "Canvas starters",
   description = "Select one or more — formats become draggable blocks; layouts add stickies and shapes on the same page.",
+  touchFriendly = false,
 }: {
   onApply: (starterIds: string[]) => void;
   title?: string;
   description?: string;
+  touchFriendly?: boolean;
 }) {
   const [selectedStarters, setSelectedStarters] = useState<Set<string>>(new Set());
   const [activeGroup, setActiveGroup] = useState<CanvasStarterCategory>("structured");
+  const touchChip = touchFriendly ? " min-h-11 touch-manipulation" : "";
 
   const visibleStarters = CANVAS_STARTERS.filter((starter) => starter.category === activeGroup);
 
@@ -32,7 +35,7 @@ export function CanvasStartersPanel({
             key={group.id}
             type="button"
             onClick={() => setActiveGroup(group.id)}
-            className={`rounded-lg px-2 py-1 text-[10px] font-semibold ${
+            className={`rounded-lg px-2 py-1 text-[10px] font-semibold${touchChip} ${
               activeGroup === group.id
                 ? "bg-teal-700 text-white"
                 : "bg-stone-100 text-stone-600"
@@ -57,7 +60,7 @@ export function CanvasStartersPanel({
                   return next;
                 })
               }
-              className={`rounded-lg px-2 py-1 text-[10px] font-semibold ${
+              className={`rounded-lg px-2 py-1 text-[10px] font-semibold${touchChip} ${
                 selected
                   ? "bg-orange-600 text-white"
                   : "bg-orange-50 text-stone-600 hover:bg-orange-100"
@@ -75,7 +78,7 @@ export function CanvasStartersPanel({
           onApply(Array.from(selectedStarters));
           setSelectedStarters(new Set());
         }}
-        className="mt-2 w-full rounded-lg bg-stone-900 px-3 py-2 text-[10px] font-bold text-white disabled:opacity-40"
+        className={`mt-2 w-full rounded-lg bg-stone-900 px-3 py-2 text-[10px] font-bold text-white disabled:opacity-40${touchChip}`}
       >
         Add {selectedStarters.size || ""} starter{selectedStarters.size === 1 ? "" : "s"} to page
       </button>

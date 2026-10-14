@@ -1,9 +1,12 @@
 "use client";
 
 import { ChevronLeft, X } from "lucide-react";
-import { createContext, useContext } from "react";
+import { createContext, useContext, type CSSProperties } from "react";
+
+import { CoreChromeAction } from "@/components/core/CoreChromeAction";
 
 const CoreToolbarEmbedContext = createContext(false);
+const CoreToolbarAnchorContext = createContext<CSSProperties | null>(null);
 
 export function CoreToolbarEmbedProvider({
   embedded,
@@ -16,6 +19,20 @@ export function CoreToolbarEmbedProvider({
     <CoreToolbarEmbedContext.Provider value={embedded}>
       {children}
     </CoreToolbarEmbedContext.Provider>
+  );
+}
+
+export function CoreToolbarAnchorProvider({
+  anchor,
+  children,
+}: {
+  anchor: CSSProperties | null;
+  children: React.ReactNode;
+}) {
+  return (
+    <CoreToolbarAnchorContext.Provider value={anchor}>
+      {children}
+    </CoreToolbarAnchorContext.Provider>
   );
 }
 
@@ -37,37 +54,44 @@ export function CoreToolbarShell({
   embedded?: boolean;
 }) {
   const embeddedFromContext = useContext(CoreToolbarEmbedContext);
+  const anchor = useContext(CoreToolbarAnchorContext);
   const isEmbedded = embedded ?? embeddedFromContext;
-  const alignClass = align === "right" ? "md:right-0 md:left-auto" : "md:left-0";
+  const alignClass = align === "right" ? "lg:right-0 lg:left-auto" : "lg:left-0";
+
+  // Fixed (+ optional measured anchor) escapes overflow-hidden ancestors that clip absolute panels.
+  // Above ink (z-5000) and hub (z-400) so iPad taps hit the sheet, not the canvas.
+  const floatingClass = anchor
+    ? `fixed z-[5100] overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-2xl ${className}`
+    : `fixed inset-x-0 bottom-0 z-[5100] max-h-[min(85dvh,32rem)] w-full rounded-t-2xl border border-stone-200 bg-white shadow-2xl lg:inset-x-auto lg:bottom-auto ${alignClass} lg:left-3 lg:top-16 lg:mt-0 lg:max-h-[min(32rem,calc(100dvh-5rem))] lg:w-[min(22rem,calc(100vw-1.5rem))] lg:rounded-2xl ${className}`;
+
   return (
     <div
       data-core-toolbar-panel
       className={
         isEmbedded
           ? `flex h-full min-h-0 w-full flex-col bg-white ${className}`
-          : `fixed inset-x-0 bottom-0 z-[90] max-h-[min(85dvh,32rem)] w-full rounded-t-2xl border border-stone-200 bg-white shadow-2xl md:absolute md:inset-x-auto md:bottom-auto ${alignClass} md:top-full md:mt-2 md:max-h-none md:w-[min(22rem,calc(100vw-2rem))] md:rounded-2xl ${className}`
+          : floatingClass
       }
+      style={!isEmbedded && anchor ? anchor : undefined}
     >
       <header className="flex shrink-0 items-center gap-2 border-b border-stone-100 px-3 py-2.5">
         {onBack ? (
-          <button
-            type="button"
-            onClick={onBack}
-            className="rounded-lg p-1.5 text-stone-500 hover:bg-stone-100"
+          <CoreChromeAction
+            onActivate={() => onBack()}
             aria-label="Back"
+            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-stone-500 touch-manipulation hover:bg-stone-100"
           >
             <ChevronLeft className="h-4 w-4" />
-          </button>
+          </CoreChromeAction>
         ) : null}
         <p className="min-w-0 flex-1 truncate text-sm font-bold text-stone-900">{title}</p>
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-lg p-1.5 text-stone-500 hover:bg-stone-100"
+        <CoreChromeAction
+          onActivate={onClose}
           aria-label="Close"
+          className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-stone-500 touch-manipulation hover:bg-stone-100"
         >
           <X className="h-4 w-4" />
-        </button>
+        </CoreChromeAction>
       </header>
       <div
         className={
@@ -94,19 +118,21 @@ export function ToggleRow({
   onChange: (value: boolean) => void;
 }) {
   return (
-    <label className="flex cursor-pointer items-start justify-between gap-3 rounded-xl px-2 py-2 hover:bg-stone-50">
+    <label className="flex min-h-11 cursor-pointer items-center justify-between gap-3 rounded-xl px-2 py-2 touch-manipulation hover:bg-stone-50">
       <span className="min-w-0">
         <span className="block text-sm font-semibold text-stone-800">{label}</span>
         {description ? (
           <span className="mt-0.5 block text-xs text-stone-500">{description}</span>
         ) : null}
       </span>
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(event) => onChange(event.target.checked)}
-        className="mt-1 rounded border-orange-300 text-orange-600"
-      />
+      <span className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center">
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(event) => onChange(event.target.checked)}
+          className="h-5 w-5 rounded border-orange-300 text-orange-600"
+        />
+      </span>
     </label>
   );
 }
@@ -152,10 +178,9 @@ export function NavRow({
   onClick: () => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="flex w-full items-center justify-between rounded-xl px-2 py-2.5 text-left hover:bg-stone-50"
+    <CoreChromeAction
+      onActivate={onClick}
+      className="flex min-h-11 w-full items-center justify-between rounded-xl px-2 py-2.5 text-left touch-manipulation hover:bg-stone-50"
     >
       <span>
         <span className="block text-sm font-semibold text-stone-800">{label}</span>
@@ -164,7 +189,7 @@ export function NavRow({
         ) : null}
       </span>
       <ChevronLeft className="h-4 w-4 rotate-180 text-stone-400" />
-    </button>
+    </CoreChromeAction>
   );
 }
 
@@ -178,14 +203,14 @@ export function OptionChip({
   onClick: () => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold ${
+    <CoreChromeAction
+      onActivate={onClick}
+      pressed={active}
+      className={`inline-flex min-h-11 items-center rounded-lg px-2.5 py-1.5 text-xs font-semibold touch-manipulation ${
         active ? "bg-stone-900 text-white" : "bg-stone-100 text-stone-600"
       }`}
     >
       {label}
-    </button>
+    </CoreChromeAction>
   );
 }

@@ -7,6 +7,7 @@ import { isValidMoodleToken, resolveMoodleCredentials } from "@/lib/lms/moodle-e
 import { syncUserLmsProvider } from "@/lib/lms/sync";
 import { db } from "@/lib/db";
 import { getOrCreateDefaultUser } from "@/lib/user";
+import { sealLmsToken } from "@/lib/security/lms-token-crypto";
 
 export async function GET() {
   try {
@@ -87,13 +88,18 @@ export async function POST(request: Request) {
       where: { userId: user.id, provider },
     });
 
+    const nextToken =
+      body.accessToken?.trim() != null && body.accessToken.trim() !== ""
+        ? sealLmsToken(body.accessToken.trim())
+        : existing?.accessToken ?? null;
+
     const connection = existing
       ? await db.lMSConnection.update({
           where: { id: existing.id },
           data: {
             displayName: baseUrl ?? existing.displayName,
             baseUrl: baseUrl ?? existing.baseUrl,
-            accessToken: body.accessToken?.trim() ?? existing.accessToken,
+            accessToken: nextToken,
             status: body.accessToken || baseUrl ? "connected" : "pending",
           },
         })
@@ -103,7 +109,7 @@ export async function POST(request: Request) {
             provider,
             displayName: baseUrl ?? provider,
             baseUrl: baseUrl ?? null,
-            accessToken: body.accessToken?.trim() ?? null,
+            accessToken: nextToken,
             status: body.accessToken || baseUrl ? "connected" : "pending",
           },
         });
@@ -122,8 +128,13 @@ export async function POST(request: Request) {
             : "Connected, but sync failed. Try Sync now.";
       }
     } else if (hasCredentials && provider === LMSProvider.MOODLE) {
-      message =
-        "Moodle connected. Use Sync from this device below to import — it uses your browser so campus Moodle sites work.";
+      try {
+        const syncResult = await syncUserLmsProvider(user.id, provider);
+        message = syncResult.message;
+      } catch {
+        message =
+          "Moodle saved to your account. On campus Wi‑Fi, open Study on any device — it syncs automatically. Or tap Sync in Settings.";
+      }
     } else if (!hasCredentials) {
       message = "Connection saved. Add a URL or token, or use OAuth to connect.";
     }

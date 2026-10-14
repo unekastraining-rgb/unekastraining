@@ -37,8 +37,25 @@ const DAY_ALIASES: Record<string, number> = {
   s: 6,
 };
 
+/** Recurring class blocks — not one-off due dates / forums. */
 const CLASS_TITLE_PATTERN =
-  /\b(lecture|class|lab|seminar|recitation|studio|discussion|section)\b/i;
+  /\b(lecture|class|lab|seminar|recitation|studio|discussion(?!\s+forum)|section)\b/i;
+
+/** Moodle (and similar) deadline events must never become weekly meetings. */
+const DEADLINE_LIKE_TITLE_PATTERN =
+  /\b(is due|discussion forum|forum|quiz|assignment|homework|aea|submission)\b|(?:^|\s)(opens?|closes?)$/i;
+
+/**
+ * True when a calendar event title looks like a recurring class meeting.
+ * Excludes discussion forums and due/open/close deadline events so they are
+ * not expanded onto every matching weekday (e.g. every Monday).
+ */
+export function isWeeklyClassEventTitle(title: string, hasRrule = false): boolean {
+  const trimmed = title.trim();
+  if (!trimmed) return false;
+  if (DEADLINE_LIKE_TITLE_PATTERN.test(trimmed)) return false;
+  return CLASS_TITLE_PATTERN.test(trimmed) || hasRrule;
+}
 
 function padTime(value: number): string {
   return String(value).padStart(2, "0");
@@ -206,8 +223,7 @@ export function calendarEventsToWeeklyMeetings(
     const title = event.title?.trim();
     if (!title) continue;
 
-    const isClassLike = CLASS_TITLE_PATTERN.test(title) || Boolean(event.rrule);
-    if (!isClassLike) continue;
+    if (!isWeeklyClassEventTitle(title, Boolean(event.rrule))) continue;
 
     const startAt = new Date(event.start_at);
     const endAt = event.end_at

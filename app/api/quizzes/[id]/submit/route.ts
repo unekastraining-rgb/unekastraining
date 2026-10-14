@@ -2,9 +2,11 @@ import { NextResponse } from "next/server";
 
 import { StudyActivityType } from "@/generated/prisma";
 import { db } from "@/lib/db";
+import { recordQuizAttemptEvidence } from "@/lib/learning/assessment/quiz-bridge";
 import { gradeQuizAnswers } from "@/lib/quizzes/grade";
 import { updateMasteryFromQuiz } from "@/lib/quizzes/mastery";
 import { parseAnswer, serializeAnswer } from "@/lib/quizzes/types";
+import { getUserAppSettings } from "@/lib/settings/app-settings";
 import { getOrCreateDefaultUser } from "@/lib/user";
 
 export async function POST(
@@ -39,7 +41,10 @@ export async function POST(
       );
     }
 
-    const graded = await gradeQuizAnswers(quiz.questions, answers);
+    const appSettings = await getUserAppSettings(user.id);
+    const graded = await gradeQuizAnswers(quiz.questions, answers, {
+      includeOpenAIPro: appSettings.aiUseOpenAIPro,
+    });
     const correctCount = graded.filter((item) => item.isCorrect).length;
     const maxScore = quiz.questions.length;
     const score = correctCount;
@@ -73,7 +78,7 @@ export async function POST(
       if (!question) continue;
 
       if (!item.isCorrect) {
-        await db.missedQuestion.create({
+        const missed = await db.missedQuestion.create({
           data: {
             userId: user.id,
             courseId: quiz.courseId,
@@ -91,11 +96,84 @@ export async function POST(
             nextReviewAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
           },
         });
+
+        try {
+          const { syncMissedQuestionRetentionItem } = await import(
+            "@/lib/learning/retention"
+          );
+          await syncMissedQuestionRetentionItem({
+            userId: user.id,
+            missedQuestionId: missed.id,
+            topicId: missed.topicId,
+            nextReviewAt: missed.nextReviewAt,
+          });
+        } catch (retentionError) {
+          console.error(
+            "ULE missed-question retention bridge failed (quiz still saved):",
+            retentionError,
+          );
+        }
       }
     }
 
     if (quiz.topicId) {
       await updateMasteryFromQuiz(user.id, quiz.topicId, score / maxScore);
+    }
+
+    // Universal Learning Engine (Phase 2A): quiz → LO → Evidence → ConceptMastery.
+    // Must not change quiz UX/scoring; failures are isolated.
+    let adaptivePayload:
+      | {
+          runId: string;
+          outcome: string;
+          reason?: string;
+          code?: string;
+          completionAttemptId?: string;
+        }
+      | undefined;
+
+    try {
+      const evidence = await recordQuizAttemptEvidence({
+        userId: user.id,
+        quiz: {
+          id: quiz.id,
+          title: quiz.title,
+          courseId: quiz.courseId,
+          topicId: quiz.topicId,
+          questions: quiz.questions,
+        },
+        attemptId: attempt.id,
+        graded: graded.map((item) => ({
+          questionId: item.questionId,
+          isCorrect: item.isCorrect,
+        })),
+      });
+
+      // Phase 2G-14 — optional Adaptive Sequence bind after whole-quiz submit.
+      // Uses an existing per-question LearningAttempt; does not create a quiz-level Attempt.
+      const {
+        bindQuizSubmitToAdaptiveSequence,
+        adaptiveQuizResponsePayload,
+      } = await import("@/lib/learning/sequence/quiz-submit-bind");
+      const bind = await bindQuizSubmitToAdaptiveSequence({
+        userId: user.id,
+        quizId: quiz.id,
+        adaptiveRunId: body.adaptiveRunId,
+        adaptiveStep: body.adaptiveStep,
+        questionCount: quiz.questions.length,
+        gradedCount: graded.length,
+        evidenceAttempts: evidence.attempts,
+      });
+      adaptivePayload = adaptiveQuizResponsePayload(bind);
+      if (bind.kind === "error") {
+        console.error(
+          "ULE adaptive sequence quiz bind failed (quiz still saved):",
+          bind.code,
+          bind.message,
+        );
+      }
+    } catch (engineError) {
+      console.error("ULE quiz evidence bridge failed (quiz still saved):", engineError);
     }
 
     await db.studySession.create({
@@ -133,6 +211,7 @@ export async function POST(
           };
         }),
       },
+      ...(adaptivePayload ? { adaptive: adaptivePayload } : {}),
     });
   } catch (error) {
     console.error("Failed to submit quiz:", error);

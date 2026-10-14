@@ -6,11 +6,13 @@ import { isAIConfigured } from "@/lib/ai/is-configured";
 import { discoverResourcesLocally, resourceMatchesQuery } from "@/lib/resources/search";
 import { serializeResource } from "@/lib/resources/serialize";
 import { RESOURCE_CATEGORY_LABELS } from "@/lib/resources/types";
+import { getUserAppSettings } from "@/lib/settings/app-settings";
 import { getOrCreateDefaultUser } from "@/lib/user";
 
 export async function POST(request: Request) {
   try {
     const user = await getOrCreateDefaultUser();
+    const appSettings = await getUserAppSettings(user.id);
     const body = await request.json();
     const question = String(body.question ?? "").trim();
 
@@ -51,7 +53,7 @@ export async function POST(request: Request) {
         role: "user",
         content: `Question: ${question}\n\nResources:\n${catalog || "(none)"}`,
       },
-    ]);
+    ], { includeOpenAIPro: appSettings.aiUseOpenAIPro });
 
     let searchTerms = question.split(/\s+/).filter(Boolean);
     let resourceIds: string[] = [];

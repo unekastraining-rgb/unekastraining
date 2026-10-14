@@ -1,8 +1,8 @@
 "use client";
 
 import {
-  NOTEBOOK_COVERS,
   PEN_PRESETS,
+  coversByCategory,
   resolveNotebookCoverStyle,
   type NotebookCoverId,
   type PageTemplateId,
@@ -18,7 +18,7 @@ export function NotebookChromePanel({
   notebook,
   coverId,
   customCoverColor,
-  showCover = true,
+  showCover = false,
   pageTemplateId,
   customBackgroundAssetId,
   penPresetId,
@@ -35,6 +35,8 @@ export function NotebookChromePanel({
   onCustomBackgroundChange,
   onPenPresetChange,
   onInkColorChange,
+  pencilOnly = false,
+  onPencilOnlyChange,
 }: {
   notebook?: NotebookChromeState;
   coverId?: NotebookCoverId;
@@ -56,11 +58,12 @@ export function NotebookChromePanel({
   onCustomBackgroundChange: (assetId: string | null) => void;
   onPenPresetChange: (id: PenPresetId) => void;
   onInkColorChange?: (color: string) => void;
+  pencilOnly?: boolean;
+  onPencilOnlyChange?: (value: boolean) => void;
 }) {
-  const previewColor = customCoverColor ?? DEFAULT_NOTEBOOK_COVER_COLOR;
   const previewStyle = resolveNotebookCoverStyle({
     coverId,
-    customCoverColor: customCoverColor ?? previewColor,
+    customCoverColor,
   });
 
   return (
@@ -74,7 +77,7 @@ export function NotebookChromePanel({
           onChange={(e) => onShowCoverChange(e.target.checked)}
           className="rounded border-orange-300"
         />
-        Show notebook cover
+        Show cover band on pages (off = more paper)
       </label>
 
       {showCover ? (
@@ -83,24 +86,37 @@ export function NotebookChromePanel({
             className={`flex h-10 items-center px-3 ${previewStyle.className ?? ""}`}
             style={previewStyle.style}
           >
-            <span className="text-xs font-bold text-white drop-shadow">Cover preview</span>
+            <span className={`text-xs font-bold ${previewStyle.titleClassName}`}>
+              Cover preview
+            </span>
           </div>
         </div>
       ) : null}
 
       <div>
-        <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400">Cover</p>
+        <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400">
+          Custom cover color
+        </p>
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <ColorPicker
             compact
-            value={previewColor}
+            value={customCoverColor ?? DEFAULT_NOTEBOOK_COVER_COLOR}
             onChange={(color) => onCustomCoverColorChange(color)}
             label="Cover"
           />
-          <span className="text-[10px] text-stone-500">Click swatch for RGB wheel</span>
+          <button
+            type="button"
+            onClick={() => onCustomCoverColorChange(null)}
+            className="rounded-lg bg-stone-100 px-2 py-1 text-[10px] font-semibold text-stone-600"
+          >
+            Use preset
+          </button>
         </div>
-        <div className="mt-2 flex flex-wrap gap-2">
-          {NOTEBOOK_COVERS.map((cover) => (
+        <p className="mt-2 text-[10px] font-bold uppercase tracking-wider text-stone-400">
+          Color covers
+        </p>
+        <div className="mt-2 grid grid-cols-5 gap-2 sm:grid-cols-6">
+          {coversByCategory("color").map((cover) => (
             <button
               key={cover.id}
               type="button"
@@ -109,16 +125,49 @@ export function NotebookChromePanel({
                 onCoverChange(cover.id);
               }}
               title={cover.label}
-              className={`h-10 w-10 rounded-xl bg-gradient-to-br ${cover.gradient} ring-2 ${
+              className={`relative aspect-[3/4] overflow-hidden rounded-lg bg-gradient-to-br shadow-sm ${cover.gradient} ring-2 ${
                 !customCoverColor && coverId === cover.id
                   ? "ring-stone-900"
                   : "ring-transparent"
               }`}
-            />
+            >
+              <div className="absolute inset-y-0 left-0 w-1 bg-black/20" />
+              <div className="absolute inset-x-0 bottom-0 h-1 bg-white/85" />
+            </button>
+          ))}
+        </div>
+        <p className="mt-3 text-[10px] font-bold uppercase tracking-wider text-stone-400">
+          Art covers
+        </p>
+        <div className="mt-2 grid grid-cols-5 gap-2 sm:grid-cols-6">
+          {coversByCategory("art").map((cover) => (
+            <button
+              key={cover.id}
+              type="button"
+              onClick={() => {
+                onCustomCoverColorChange(null);
+                onCoverChange(cover.id);
+              }}
+              title={cover.label}
+              className={`relative aspect-[3/4] overflow-hidden rounded-lg shadow-sm ring-2 ${
+                !customCoverColor && coverId === cover.id
+                  ? "ring-stone-900"
+                  : "ring-transparent"
+              }`}
+              style={
+                cover.artBackground
+                  ? { backgroundImage: cover.artBackground, backgroundSize: "cover" }
+                  : undefined
+              }
+            >
+              <div className="absolute inset-y-0 left-0 w-1 bg-black/20" />
+              <div className="absolute inset-x-0 bottom-0 h-1 bg-white/85" />
+            </button>
           ))}
         </div>
         {onApplyCoverPalette || onApplyPalette ? (
           <CompactPalettePicker
+            applyGlobally={false}
             label="Cover palettes"
             onSelectPalette={(colors) => {
               onApplyCoverPalette?.(colors);
@@ -166,6 +215,7 @@ export function NotebookChromePanel({
         </div>
         {onApplyPagePalette || onApplyPalette ? (
           <CompactPalettePicker
+            applyGlobally={false}
             label="Page palettes"
             onSelectPalette={(colors) => {
               onApplyPagePalette?.(colors);
@@ -181,6 +231,7 @@ export function NotebookChromePanel({
         </p>
         <div className="mt-2">
           <TemplateLibrary
+            compact
             selectedBuiltinId={pageTemplateId}
             selectedImportedId={customBackgroundAssetId ?? undefined}
             onSelectBuiltin={(id) => {
@@ -199,7 +250,7 @@ export function NotebookChromePanel({
             Pen and highlighter only — not tied to notebook palettes.
           </p>
           <div className="mt-2 flex items-center gap-2">
-            <ColorPicker compact value={inkColor ?? "#44403c"} onChange={onInkColorChange} label="Ink" />
+            <ColorPicker compact touchFriendly value={inkColor ?? "#44403c"} onChange={onInkColorChange} label="Ink" />
             <span className="text-[10px] text-stone-500">Click swatch for RGB wheel</span>
           </div>
         </div>
@@ -224,6 +275,17 @@ export function NotebookChromePanel({
             </button>
           ))}
         </div>
+        {onPencilOnlyChange ? (
+          <label className="mt-3 flex items-center gap-2 text-[11px] font-semibold text-stone-600">
+            <input
+              type="checkbox"
+              checked={pencilOnly}
+              onChange={(event) => onPencilOnlyChange(event.target.checked)}
+              className="rounded border-orange-300"
+            />
+            Pencil only (stylus draws · finger pans). Off = finger draws · two-finger pans.
+          </label>
+        ) : null}
       </div>
     </section>
   );

@@ -162,7 +162,9 @@ const SHAPE_ENTRIES: Array<{ kind: DecorationKind; name: string; tags: string[];
   { kind: "star_shape", name: "Star", tags: ["favorite"], w: 80, h: 80 },
   { kind: "diamond_shape", name: "Diamond", tags: ["gem"], w: 70, h: 90 },
   { kind: "arrow", name: "Arrow", tags: ["point", "direction"], w: 120, h: 24 },
-  { kind: "line", name: "Line", tags: ["connector"], w: 120, h: 8 },
+  { kind: "line", name: "Line", tags: ["connector", "divider"], w: 180, h: 6 },
+  { kind: "vline", name: "Vertical line", tags: ["divider", "column"], w: 6, h: 180 },
+  { kind: "border_frame", name: "Border frame", tags: ["border", "box", "frame"], w: 220, h: 160 },
   { kind: "banner", name: "Banner", tags: ["label", "header"], w: 160, h: 40 },
   { kind: "dot", name: "Dot", tags: ["bullet"], w: 16, h: 16 },
 ];

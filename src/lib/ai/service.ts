@@ -1,8 +1,9 @@
 import { AIProviderChainExhaustedError } from "./errors";
-import { getAIProviderChain } from "./config";
+import { getAIProviderChain, getOpenRouterVisionModel } from "./config";
 import { FallbackAIService } from "./fallback";
 import { buildConfiguredAIProviders } from "./provider-factory";
 import { GeminiProvider } from "./providers/gemini";
+import { OpenAICompatibleProvider } from "./providers/openai-compatible";
 import type {
   AICompletionOptions,
   AICompletionResult,
@@ -18,7 +19,7 @@ export class AIService {
   }
 
   getProviderName(): string {
-    return this.getProvider().name;
+    return this.resolveProvider().name;
   }
 
   setProvider(provider: AIServiceProvider): void {
@@ -29,27 +30,48 @@ export class AIService {
     messages: AIMessage[],
     options?: AICompletionOptions,
   ): Promise<AICompletionResult> {
-    return this.getProvider().complete(messages, options);
+    // Rebuild when Pro is requested so Settings toggles take effect without restart.
+    if (options?.includeOpenAIPro != null || !this.provider) {
+      return this.resolveProvider(options?.includeOpenAIPro).complete(
+        messages,
+        options,
+      );
+    }
+    return this.provider.complete(messages, options);
   }
 
-  private getProvider(): AIServiceProvider {
-    if (!this.provider) {
-      const chain = buildConfiguredAIProviders(getAIProviderChain());
-      if (chain.length === 0) {
-        throw new AIProviderChainExhaustedError([]);
-      }
-      this.provider =
-        chain.length === 1 ? chain[0]! : new FallbackAIService(chain);
+  private resolveProvider(includeOpenAIPro?: boolean): AIServiceProvider {
+    const chain = buildConfiguredAIProviders(
+      getAIProviderChain({ includeOpenAIPro }),
+    );
+    if (chain.length === 0) {
+      throw new AIProviderChainExhaustedError([]);
     }
-
-    return this.provider;
+    const resolved =
+      chain.length === 1 ? chain[0]! : new FallbackAIService(chain);
+    if (includeOpenAIPro == null) {
+      this.provider = resolved;
+    }
+    return resolved;
   }
 }
 
 export const aiService = new AIService();
 
-export function getVisionExtractor():
-  | { provider: "gemini"; extract: GeminiProvider["completeWithImage"] }
+type VisionExtract = (
+  prompt: string,
+  imageBase64: string,
+  mimeType: string,
+) => Promise<string>;
+
+/**
+ * Free-tier OCR chain: Gemini → OpenRouter vision → OpenAI (optional Pro).
+ * Powers syllabus/photo cold start without pasted chapters.
+ */
+export function getVisionExtractor(options?: {
+  includeOpenAIPro?: boolean;
+}):
+  | { provider: string; extract: VisionExtract }
   | { provider: "none" }
 {
   const gemini = buildConfiguredAIProviders(["gemini"])[0];
@@ -58,6 +80,36 @@ export function getVisionExtractor():
       provider: "gemini",
       extract: gemini.completeWithImage.bind(gemini),
     };
+  }
+
+  const openrouter = buildConfiguredAIProviders(["openrouter"])[0];
+  if (openrouter instanceof OpenAICompatibleProvider) {
+    const visionModel = getOpenRouterVisionModel();
+    return {
+      provider: "openrouter",
+      extract: (prompt, imageBase64, mimeType) =>
+        openrouter.completeWithImage(prompt, imageBase64, mimeType, {
+          model: visionModel,
+        }),
+    };
+  }
+
+  if (options?.includeOpenAIPro && process.env.OPENAI_API_KEY?.trim()) {
+    try {
+      const compatible = new OpenAICompatibleProvider({
+        name: "openai",
+        apiKey: process.env.OPENAI_API_KEY.trim(),
+        baseURL: "https://api.openai.com/v1",
+        defaultModel: process.env.OPENAI_MODEL?.trim() || "gpt-4o-mini",
+      });
+      return {
+        provider: "openai",
+        extract: (prompt, imageBase64, mimeType) =>
+          compatible.completeWithImage(prompt, imageBase64, mimeType),
+      };
+    } catch {
+      // fall through
+    }
   }
 
   return { provider: "none" };

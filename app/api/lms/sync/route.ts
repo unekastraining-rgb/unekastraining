@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { LMSProvider } from "@/generated/prisma";
 import { syncUserLmsProvider } from "@/lib/lms/sync";
+import { logOpsEvent } from "@/lib/ops/safe-log";
 import { getOrCreateDefaultUser } from "@/lib/user";
 
 export async function POST(request: Request) {
@@ -16,8 +17,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true, result });
   } catch (error) {
     console.error("Failed to sync LMS:", error);
-    const message = error instanceof Error ? error.message : "Failed to sync LMS.";
-    const status = message.includes("Connect your LMS") ? 400 : 500;
-    return NextResponse.json({ success: false, error: message }, { status });
+    const raw = error instanceof Error ? error.message : "";
+    const needsConnect = raw.includes("Connect your LMS");
+    const status = needsConnect ? 400 : 500;
+    logOpsEvent("lms.sync.failure", { status });
+    return NextResponse.json(
+      {
+        success: false,
+        error: needsConnect
+          ? "Connect your LMS in Settings, then try sync again."
+          : "Could not sync LMS right now. Try again later.",
+      },
+      { status },
+    );
   }
 }

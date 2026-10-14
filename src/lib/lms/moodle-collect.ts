@@ -6,6 +6,7 @@ import {
   fetchMoodleEnrolledCourses,
   moodleCalendarEventsToAssignments,
 } from "@/lib/lms/moodle-api";
+import { formatMoodleModuleOutline } from "@/lib/lms/moodle-cold-start";
 import { normalizeMoodleBaseUrl } from "@/lib/lms/moodle-url";
 import type { MoodleImportCourse } from "@/lib/lms/moodle-import";
 import {
@@ -67,6 +68,8 @@ export async function collectMoodleCoursesForImport(
       });
     }
 
+    const modulesOutline = formatMoodleModuleOutline(contents);
+
     payload.push({
       ...course,
       assignments: withGrades,
@@ -75,6 +78,7 @@ export async function collectMoodleCoursesForImport(
       syllabusText: syllabusText || null,
       syllabusUrl,
       syllabusModuleName,
+      modulesOutline: modulesOutline || null,
     });
   }
 

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import type { CSSProperties } from "react";
+import Script from "next/script";
 import { Geist_Mono } from "next/font/google";
 import { Plus_Jakarta_Sans } from "next/font/google";
 
@@ -11,10 +12,11 @@ import {
   computeThemeCssVariables,
   reconstructPaletteFromSettings,
 } from "@/lib/customization/apply-palette";
+import { CORE_TOUCH_BOOT_SCRIPT } from "@/lib/core/core-hard-nav";
 import { getOrCreateUserPreferences } from "@/lib/preferences";
 import { resolveThemeColors } from "@/lib/theme/templates";
 import { DEFAULT_THEME_SETTINGS } from "@/lib/theme/types";
-import { getCurrentUser } from "@/lib/user";
+import { getCurrentUser, getOrCreateDefaultUser } from "@/lib/user";
 
 const plusJakarta = Plus_Jakarta_Sans({
   variable: "--font-plus-jakarta",
@@ -39,7 +41,14 @@ export const viewport = {
 };
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {
-  const user = await getCurrentUser();
+  let user = await getCurrentUser();
+  if (!user && process.env.NODE_ENV === "development") {
+    try {
+      user = await getOrCreateDefaultUser();
+    } catch {
+      user = null;
+    }
+  }
   const preferences = user
     ? await getOrCreateUserPreferences(user.id)
     : DEFAULT_THEME_SETTINGS;
@@ -55,6 +64,9 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
       style={themeVars as CSSProperties}
     >
       <body className="min-h-full overflow-x-clip">
+        <Script id="core-touch-boot" strategy="beforeInteractive">
+          {CORE_TOUCH_BOOT_SCRIPT}
+        </Script>
         <AppThemeRoot initialSettings={preferences}>
           {children}
           <GlobalSearchLauncher />

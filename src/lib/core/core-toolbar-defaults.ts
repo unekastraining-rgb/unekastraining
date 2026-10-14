@@ -2,24 +2,49 @@ import type { CoreToolbarItemId, CoreToolbarState } from "@/lib/core/core-toolba
 
 export const DEFAULT_TOOLBAR_VISIBLE: CoreToolbarItemId[] = [
   "chat",
-  "readWrite",
-  "select",
-  "lasso",
   "pen",
   "eraser",
+  "lasso",
+  "select",
   "text",
-  "elements",
   "stickers",
   "images",
-  "templates",
+  "elements",
   "shapes",
   "sticky",
-  "laser",
-  "record",
-  "zoom",
+  "templates",
+  "starters",
   "customize",
-  "clearPage",
 ];
+
+/** Older “pen-only” chrome — upgrade back to the full writing toolkit. */
+const LEGACY_MINIMAL_TOOLBAR = new Set<CoreToolbarItemId>([
+  "pen",
+  "eraser",
+  "lasso",
+  "select",
+  "text",
+  "templates",
+]);
+
+export function normalizeToolbarVisibleItems(
+  items: CoreToolbarItemId[] | undefined | null,
+): CoreToolbarItemId[] {
+  if (!items || items.length === 0) return [...DEFAULT_TOOLBAR_VISIBLE];
+  const onlyLegacy =
+    items.length <= 6 && items.every((id) => LEGACY_MINIMAL_TOOLBAR.has(id));
+  if (onlyLegacy) return [...DEFAULT_TOOLBAR_VISIBLE];
+  let next = [...items];
+  if (!next.includes("starters")) {
+    const templatesIdx = next.indexOf("templates");
+    if (templatesIdx >= 0) next.splice(templatesIdx + 1, 0, "starters");
+    else next.push("starters");
+  }
+  if (!next.includes("customize")) {
+    next = [...next, "customize"];
+  }
+  return next;
+}
 
 export const ALL_TOOLBAR_ITEMS: CoreToolbarItemId[] = [
   "chat",
@@ -33,6 +58,7 @@ export const ALL_TOOLBAR_ITEMS: CoreToolbarItemId[] = [
   "stickers",
   "images",
   "templates",
+  "starters",
   "shapes",
   "sticky",
   "laser",
@@ -50,7 +76,7 @@ export function defaultCoreToolbarState(
 ): CoreToolbarState {
   return {
     readOnly: false,
-    visibleItems,
+    visibleItems: normalizeToolbarVisibleItems(visibleItems),
     activePenMode: "fountain",
     lasso: {
       mode: "freehand",
@@ -116,6 +142,23 @@ export function penModeToInkTool(mode: CoreToolbarState["activePenMode"]): impor
   }
 }
 
+export function penModeToInkMedium(
+  mode: CoreToolbarState["activePenMode"],
+): "ink" | "chalk" | "crayon" | "colorPencil" | "marker" {
+  switch (mode) {
+    case "chalk":
+      return "chalk";
+    case "crayon":
+      return "crayon";
+    case "colorPencil":
+      return "colorPencil";
+    case "marker":
+      return "marker";
+    default:
+      return "ink";
+  }
+}
+
 export function penModeToInkSize(mode: CoreToolbarState["activePenMode"], state: CoreToolbarState): number {
   switch (mode) {
     case "fountain":
@@ -124,8 +167,16 @@ export function penModeToInkSize(mode: CoreToolbarState["activePenMode"], state:
       return state.fountainPen.thickness;
     case "pencil":
       return 2;
+    case "colorPencil":
+      return 3;
+    case "chalk":
+      return 6;
+    case "crayon":
+      return 9;
+    case "marker":
+      return 10;
     case "highlighter":
-      return 12;
+      return 14;
     case "tape":
       return 18;
     case "shape":

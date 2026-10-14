@@ -3,7 +3,16 @@ import type { SessionPayload } from "./session-token";
 export const SESSION_COOKIE_NAME = "sh_session";
 
 function getSecret() {
-  return process.env.SESSION_SECRET ?? "dev-insecure-session-secret-change-me";
+  const secret = process.env.SESSION_SECRET?.trim();
+  if (process.env.NODE_ENV === "production") {
+    if (!secret || secret === "dev-insecure-session-secret-change-me") {
+      throw new Error(
+        "SESSION_SECRET must be set to a strong secret in production.",
+      );
+    }
+    return secret;
+  }
+  return secret || "dev-insecure-session-secret-change-me";
 }
 
 function base64UrlToBytes(value: string) {

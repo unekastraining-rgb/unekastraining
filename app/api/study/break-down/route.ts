@@ -7,6 +7,7 @@ import { loadCourseSourceText } from "@/lib/ai/course-source";
 import { generateQuizForCourse } from "@/lib/quizzes/generate";
 import { generateScheduleProposals } from "@/lib/schedule/proposals";
 import { db } from "@/lib/db";
+import { getUserAppSettings } from "@/lib/settings/app-settings";
 import { getOrCreateDefaultTopic } from "@/lib/topics";
 import { getOrCreateDefaultUser } from "@/lib/user";
 
@@ -57,6 +58,8 @@ export async function POST(request: Request) {
 
     const topicLabel = focus ?? course.title;
 
+    const appSettings = await getUserAppSettings(user.id);
+
     const sourceResult = await loadCourseSourceText(user.id, courseId);
     const source =
       sourceResult?.text ??
@@ -84,7 +87,7 @@ Return ONLY JSON:
 }`,
         },
       ],
-      { temperature: 0.3, jsonMode: true },
+      { temperature: 0.3, jsonMode: true, includeOpenAIPro: appSettings.aiUseOpenAIPro },
     );
 
     const outline = parseOutline(outlineResponse.content);
@@ -103,7 +106,7 @@ Outline: ${JSON.stringify(outline.sections)}
 Return ONLY JSON: { "cards": [{"front":"...","back":"..."}] } (8-12 cards)`,
         },
       ],
-      { temperature: 0.3, jsonMode: true },
+      { temperature: 0.3, jsonMode: true, includeOpenAIPro: appSettings.aiUseOpenAIPro },
     );
 
     const cards = parseCards(cardsResponse.content);
@@ -124,7 +127,7 @@ Return ONLY JSON: { "cards": [{"front":"...","back":"..."}] } (8-12 cards)`,
 
     const quiz = await generateQuizForCourse(user.id, courseId, {
       topicName: topicLabel,
-      questionCount: 5,
+      questionCount: 24,
     });
 
     const proposals = await generateScheduleProposals(user.id);

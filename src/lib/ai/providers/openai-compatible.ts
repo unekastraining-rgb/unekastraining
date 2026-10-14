@@ -83,4 +83,43 @@ export class OpenAICompatibleProvider implements AIServiceProvider {
       throw formatProviderError(this.name, error);
     }
   }
+
+  /** Multimodal OCR / image extract (OpenAI-compatible vision models). */
+  async completeWithImage(
+    prompt: string,
+    imageBase64: string,
+    mimeType: string,
+    options?: { model?: string },
+  ): Promise<string> {
+    const model = options?.model ?? this.defaultModel;
+    try {
+      const response = await this.client.chat.completions.create({
+        model,
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: prompt },
+              {
+                type: "image_url",
+                image_url: {
+                  url: `data:${mimeType};base64,${imageBase64}`,
+                },
+              },
+            ],
+          },
+        ],
+        temperature: 0.1,
+        max_tokens: 8192,
+      });
+
+      const content = response.choices[0]?.message?.content?.trim();
+      if (!content) {
+        throw new Error(`Could not extract text from the uploaded image (${this.name}).`);
+      }
+      return content;
+    } catch (error) {
+      throw formatProviderError(this.name, error);
+    }
+  }
 }

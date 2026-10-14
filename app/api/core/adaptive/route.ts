@@ -11,6 +11,7 @@ import {
 } from "@/lib/core/format-engine";
 import { parseNoteDocument } from "@/lib/core/note-types";
 import type { NoteMethod } from "@/generated/prisma";
+import { getUserAppSettings } from "@/lib/settings/app-settings";
 import { getOrCreateDefaultUser } from "@/lib/user";
 
 function parseJson(content: string) {
@@ -70,6 +71,8 @@ export async function POST(request: Request) {
       (format) => `${format.id}: ${format.label} — ${format.description}`,
     ).join("\n");
 
+    const appSettings = await getUserAppSettings(user.id);
+
     const aiResponse = await aiService.complete(
       [
         {
@@ -97,7 +100,7 @@ Return ONLY JSON:
 }`,
         },
       ],
-      { temperature: 0.3 },
+      { temperature: 0.3, includeOpenAIPro: appSettings.aiUseOpenAIPro },
     );
 
     let aiPayload: {

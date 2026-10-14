@@ -5,6 +5,10 @@ import type {
   CalendarPriority,
 } from "@/generated/prisma";
 import { isAssignmentCompleted } from "@/lib/academic";
+import {
+  readableCourseTitle,
+  readableMeetingTitle,
+} from "@/lib/courses/display-name";
 
 import { resolveItemColor } from "./colors";
 import { expandRecurrenceOccurrences } from "./recurrence";
@@ -30,7 +34,7 @@ interface DbCalendarEvent {
   completed: boolean;
   location: string | null;
   courseId: string | null;
-  course: { id: string; title: string; color: string | null } | null;
+  course: { id: string; title: string; color: string | null; code?: string | null } | null;
   externalSource?: string | null;
   calendarConnectionId?: string | null;
 }
@@ -46,7 +50,7 @@ interface DbAssignment {
   kind: AssignmentKind;
   status: AssignmentStatus;
   courseId: string;
-  course: { id: string; title: string; color: string | null };
+  course: { id: string; title: string; color: string | null; code?: string | null };
   calendarEvent: { id: string } | null;
 }
 
@@ -58,7 +62,7 @@ interface DbMeeting {
   endTime: string;
   location: string | null;
   title: string | null;
-  course: { id: string; title: string; color: string | null };
+  course: { id: string; title: string; color: string | null; code?: string | null };
 }
 
 function assignmentKindToEventType(kind: AssignmentKind): CalendarEventTypeFilter {
@@ -118,7 +122,9 @@ export function calendarEventToItem(event: DbCalendarEvent): WorkspaceCalendarIt
     color: resolveItemColor(event.color, courseColor),
     colorIsCustom: Boolean(event.color),
     courseId: event.courseId,
-    courseTitle: event.course?.title ?? null,
+    courseTitle: event.course
+      ? readableCourseTitle(event.course.title, event.course.code)
+      : null,
     priority: event.priority,
     completed: event.completed,
     location: event.location,
@@ -142,20 +148,32 @@ export function assignmentToItem(assignment: DbAssignment): WorkspaceCalendarIte
   const eventType = assignmentKindToEventType(assignment.kind);
 
   if (assignment.scheduledStartAt) {
+    const start = assignment.scheduledStartAt;
+    const end =
+      assignment.scheduledEndAt ??
+      new Date(start.getTime() + 30 * 60 * 1000);
+    const durationMs = end.getTime() - start.getTime();
+    const coversFullDay =
+      durationMs >= 18 * 60 * 60 * 1000 ||
+      (start.getHours() === 0 &&
+        start.getMinutes() === 0 &&
+        end.getHours() >= 23 &&
+        durationMs >= 12 * 60 * 60 * 1000);
+
     return {
       id: `asg-${assignment.id}`,
       source: "assignment",
       sourceId: assignment.id,
       title: assignment.title,
       description: assignment.description,
-      startAt: assignment.scheduledStartAt.toISOString(),
-      endAt: assignment.scheduledEndAt?.toISOString() ?? null,
-      allDay: false,
+      startAt: start.toISOString(),
+      endAt: end.toISOString(),
+      allDay: coversFullDay,
       eventType,
       color,
       colorIsCustom: Boolean(assignment.calendarColor),
       courseId: assignment.courseId,
-      courseTitle: assignment.course.title,
+      courseTitle: readableCourseTitle(assignment.course.title, assignment.course.code),
       priority: "MEDIUM",
       completed,
       editable: true,
@@ -178,7 +196,7 @@ export function assignmentToItem(assignment: DbAssignment): WorkspaceCalendarIte
     color,
     colorIsCustom: Boolean(assignment.calendarColor),
     courseId: assignment.courseId,
-    courseTitle: assignment.course.title,
+    courseTitle: readableCourseTitle(assignment.course.title, assignment.course.code),
     priority: "MEDIUM",
     completed,
     editable: true,
@@ -209,7 +227,7 @@ export function expandMeetingsToItems(
         id: `mtg-${meeting.id}-${dateKey}`,
         source: "meeting",
         sourceId: meeting.id,
-        title: meeting.title ?? meeting.course.title,
+        title: readableMeetingTitle(meeting.title, meeting.course),
         description: null,
         startAt: startAt.toISOString(),
         endAt: endAt.toISOString(),
@@ -217,7 +235,7 @@ export function expandMeetingsToItems(
         eventType: "CLASS",
         color: resolveItemColor(null, meeting.course.color),
         courseId: meeting.courseId,
-        courseTitle: meeting.course.title,
+        courseTitle: readableCourseTitle(meeting.course.title, meeting.course.code),
         priority: "LOW",
         completed: false,
         location: meeting.location,
@@ -293,11 +311,11 @@ export function buildUnifiedCalendarItems(input: {
 }
 
 export function coursesToWorkspace(
-  courses: Array<{ id: string; title: string; color: string | null }>,
+  courses: Array<{ id: string; title: string; color: string | null; code?: string | null }>,
 ): WorkspaceCourse[] {
   return courses.map((course) => ({
     id: course.id,
-    title: course.title,
+    title: readableCourseTitle(course.title, course.code),
     color: course.color,
   }));
 }

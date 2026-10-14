@@ -2,6 +2,7 @@ import { AssignmentStatus } from "@/generated/prisma";
 import { buildSixHrefForTopic } from "@/lib/csl/six-recommendations";
 import { writeCalendarEventToGoogle } from "@/lib/calendar/google-calendar";
 import { db } from "@/lib/db";
+import { readableCourseTitle } from "@/lib/courses/display-name";
 
 export interface ScheduleChange {
   type: "study_block" | "reschedule_assignment" | "review_topic";
@@ -26,13 +27,13 @@ export async function generateScheduleProposals(userId: string) {
         status: { in: [AssignmentStatus.NOT_STARTED, AssignmentStatus.IN_PROGRESS] },
         dueDate: { lte: threeDays },
       },
-      include: { course: { select: { title: true } } },
+      include: { course: { select: { title: true, code: true } } },
       orderBy: { dueDate: "asc" },
       take: 5,
     }),
     db.topicMastery.findMany({
       where: { userId, proficiency: { lt: 0.5 } },
-      include: { topic: { include: { course: { select: { title: true } } } } },
+      include: { topic: { include: { course: { select: { title: true, code: true } } } } },
       orderBy: { proficiency: "asc" },
       take: 4,
     }),
@@ -47,8 +48,9 @@ export async function generateScheduleProposals(userId: string) {
     changes.push({
       type: "reschedule_assignment",
       title: `Block time for: ${assignment.title}`,
-      description: `${assignment.course.title} is due ${dueLabel}. Schedule a focused work session.`,
+      description: `${readableCourseTitle(assignment.course.title, assignment.course.code)} is due ${dueLabel}. Schedule a focused work session.`,
       assignmentId: assignment.id,
+      courseId: assignment.courseId,
       suggestedDate: assignment.dueDate
         ? new Date(assignment.dueDate.getTime() - 24 * 60 * 60 * 1000).toISOString()
         : undefined,
@@ -71,7 +73,7 @@ export async function generateScheduleProposals(userId: string) {
     changes.push({
       type: "review_topic",
       title: `Review: ${mastery.topic.name}`,
-      description: `Low mastery (${Math.round(mastery.proficiency * 100)}%) in ${mastery.topic.course.title}. Open the linked Six session when this block starts.`,
+      description: `Low mastery (${Math.round(mastery.proficiency * 100)}%) in ${readableCourseTitle(mastery.topic.course.title, mastery.topic.course.code)}. Open the linked Six session when this block starts.`,
       topicId: mastery.topicId,
       courseId: mastery.topic.courseId,
       sixHref,

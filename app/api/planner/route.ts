@@ -3,41 +3,122 @@ import { NextResponse } from "next/server";
 import { AssignmentStatus } from "@/generated/prisma";
 import { computePriority, isAssignmentCompleted } from "@/lib/academic";
 import { resolveCourseForUser } from "@/lib/courses";
+import { readableCourseCode, readableCourseTitle } from "@/lib/courses/display-name";
 import { db } from "@/lib/db";
+import { fromLocalAssignment } from "@/lib/learning/academic";
+import { buildAdaptiveLearningPlan } from "@/lib/learning/adaptive-planner";
+import { enrichAssignmentsWithConceptLinks } from "@/lib/learning/school-lms";
 import { getOrCreateDefaultUser } from "@/lib/user";
 
 export async function GET() {
   try {
     const user = await getOrCreateDefaultUser();
 
-    const assignments = await db.assignment.findMany({
-      where: {
-        course: { userId: user.id },
-      },
-      include: {
-        course: {
-          select: { id: true, title: true, code: true },
+    const [assignments, topics] = await Promise.all([
+      db.assignment.findMany({
+        where: {
+          course: { userId: user.id },
         },
-      },
-      orderBy: { dueDate: "asc" },
-    });
+        include: {
+          course: {
+            select: { id: true, title: true, code: true },
+          },
+        },
+        orderBy: { dueDate: "asc" },
+      }),
+      // 2P-49 — same soft concept bridge as Hub / Course (no second recommender).
+      db.topic.findMany({
+        where: { course: { userId: user.id }, conceptId: { not: null } },
+        select: { id: true, name: true, courseId: true, conceptId: true },
+      }),
+    ]);
 
-    const data = assignments.map((assignment) => ({
-      id: assignment.id,
-      title: assignment.title,
-      description: assignment.description,
-      dueDate: assignment.dueDate?.toISOString() ?? null,
-      status: assignment.status,
-      grade: assignment.grade,
-      maxGrade: assignment.maxGrade,
-      courseId: assignment.courseId,
-      course: assignment.course.title,
-      courseCode: assignment.course.code,
-      priority: computePriority(assignment.dueDate),
-      completed: isAssignmentCompleted(assignment.status),
+    const topicRows = topics.map((t) => ({
+      id: t.id,
+      name: t.name,
+      courseId: t.courseId,
+      conceptId: t.conceptId,
     }));
 
-    return NextResponse.json({ success: true, data });
+    const enriched = enrichAssignmentsWithConceptLinks(
+      assignments.map((assignment) => ({
+        id: assignment.id,
+        title: assignment.title,
+        description: assignment.description,
+        dueDate: assignment.dueDate?.toISOString() ?? null,
+        status: assignment.status,
+        grade: assignment.grade,
+        maxGrade: assignment.maxGrade,
+        courseId: assignment.courseId,
+        course: readableCourseTitle(assignment.course.title, assignment.course.code),
+        courseCode: readableCourseCode(assignment.course),
+        priority: computePriority(assignment.dueDate),
+        completed: isAssignmentCompleted(assignment.status),
+      })),
+      topicRows,
+    );
+
+    // Phase 15 — additive adaptive plan (never blocks planner if it fails).
+    let adaptivePlan: {
+      activities: Array<{
+        conceptId: string;
+        title: string;
+        action: string;
+        sixTechnique?: string | null;
+        scheduledStartAt: string;
+        minutes: number;
+        urgency: string;
+        reason: string;
+        room?: string;
+      }>;
+      needsCount: number;
+      /** Planned learning blocks only — does NOT create calendar events. */
+      calendarWritten: false;
+    } | null = null;
+    try {
+      const academicItems = assignments.map((a) =>
+        fromLocalAssignment(user.id, {
+          id: a.id,
+          courseId: a.courseId,
+          title: a.title,
+          description: a.description,
+          dueDate: a.dueDate,
+          kind: a.kind,
+          status: a.status,
+        }),
+      );
+      const plan = await buildAdaptiveLearningPlan({
+        userId: user.id,
+        items: academicItems,
+        topics: topicRows,
+      });
+      adaptivePlan = {
+        needsCount: plan.needs.length,
+        /** Planned learning blocks only — does NOT create calendar events. */
+        calendarWritten: false as const,
+        activities: plan.activities.slice(0, 12).map((a) => ({
+          conceptId: a.conceptId,
+          title: a.title,
+          action: a.action,
+          sixTechnique: a.sixTechnique ?? null,
+          scheduledStartAt: a.scheduledStartAt.toISOString(),
+          minutes: a.minutes,
+          urgency: a.urgency,
+          reason: a.reason,
+          room: a.room,
+        })),
+      };
+    } catch (err) {
+      console.warn("Phase 15 adaptive plan skipped:", err);
+      adaptivePlan = null;
+    }
+
+    return NextResponse.json({
+      success: true,
+      data: enriched,
+      /** Bundle B Phase 15 — optional scheduled learning activities. */
+      adaptivePlan,
+    });
   } catch (error) {
     console.error("Failed to fetch planner tasks:", error);
     return NextResponse.json(
@@ -85,10 +166,13 @@ export async function POST(request: Request) {
           dueDate: assignment.dueDate?.toISOString() ?? null,
           status: assignment.status,
           courseId: assignment.courseId,
-          course: assignment.course.title,
-          courseCode: assignment.course.code,
+          course: readableCourseTitle(assignment.course.title, assignment.course.code),
+          courseCode: readableCourseCode(assignment.course),
           priority: computePriority(assignment.dueDate),
           completed: false,
+          conceptId: null,
+          topicId: null,
+          alignmentState: "unaligned" as const,
         },
       },
       { status: 201 },
@@ -159,7 +243,7 @@ export async function PATCH(request: Request) {
         title: assignment.title,
         dueDate: assignment.dueDate?.toISOString() ?? null,
         status: assignment.status,
-        course: assignment.course.title,
+        course: readableCourseTitle(assignment.course.title, assignment.course.code),
         priority: computePriority(assignment.dueDate),
         completed: isAssignmentCompleted(assignment.status),
       },

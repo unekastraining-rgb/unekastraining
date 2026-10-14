@@ -123,6 +123,7 @@ export async function generateCurriculumFromSyllabus(input: {
   courseName: string;
   courseCode?: string | null;
   gradeLevel?: string | null;
+  includeOpenAIPro?: boolean;
 }): Promise<GeneratedCurriculum> {
   const text = input.syllabusText.trim();
   if (!text) {
@@ -152,7 +153,7 @@ SYLLABUS:
 ${text.slice(0, 14000)}`,
         },
       ],
-      { temperature: 0.35, maxTokens: 10000, jsonMode: true },
+      { temperature: 0.35, maxTokens: 10000, jsonMode: true, includeOpenAIPro: input.includeOpenAIPro },
     );
 
     const parsed = parseAiJson<GeneratedCurriculum>(result.content);

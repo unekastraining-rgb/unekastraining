@@ -6,6 +6,9 @@ import { CalendarDays, FolderOpen, LogOut } from "lucide-react";
 import { hubTabs } from "./hubTabs";
 import { StudyHaulSidebarTruck } from "./StudyHaulSidebarTruck";
 import type { HubTab } from "./types";
+import { useCompactHubNav } from "@/hooks/useCompactHubNav";
+import { useIsClientMounted } from "@/hooks/useClientSnapshot";
+import { useTapHandler } from "@/hooks/useTapHandler";
 
 const mainTabs = hubTabs.filter((tab) => tab.id !== "settings");
 const settingsTab = hubTabs.find((tab) => tab.id === "settings")!;
@@ -13,19 +16,37 @@ const settingsTab = hubTabs.find((tab) => tab.id === "settings")!;
 export function SidebarNav({
   active,
   onChange,
+  variant = "sidebar",
 }: {
   active: HubTab;
   onChange: (tab: HubTab) => void;
+  /** `drawer` = always visible inside the mobile hamburger sheet */
+  variant?: "sidebar" | "drawer";
 }) {
+  const compactNav = useCompactHubNav();
+
   async function signOut() {
     await fetch("/api/auth/logout", { method: "POST" });
     window.location.href = "/login";
   }
 
+  if (variant === "sidebar" && compactNav) {
+    return null;
+  }
+
+  const shellClass =
+    variant === "drawer"
+      ? "w-full shrink-0"
+      : "hidden w-60 shrink-0 xl:block xl:w-72";
+
   return (
-    <aside className="hidden w-60 shrink-0 lg:w-64 xl:w-72 md:block">
+    <aside className={shellClass}>
       <nav
-        className="sticky top-24 flex min-h-[calc(100vh-7rem)] flex-col overflow-hidden rounded-[1.75rem] border p-2.5"
+        className={
+          variant === "drawer"
+            ? "flex min-h-0 flex-col overflow-hidden rounded-2xl border p-2"
+            : "sticky top-24 flex min-h-[calc(100vh-7rem)] flex-col overflow-hidden rounded-[1.75rem] border p-2.5"
+        }
         style={{
           background: "var(--sh-sidebar-surface)",
           borderColor: "var(--sh-border-subtle)",
@@ -90,7 +111,9 @@ export function SidebarNav({
             onClick={() => void signOut()}
             className="flex w-full items-center gap-3.5 rounded-full px-4 py-3 text-left text-stone-600 transition hover:bg-[var(--sh-warm-soft)] hover:text-[var(--sh-deep)]"
           >
-            <LogOut className="h-[1.375rem] w-[1.375rem] shrink-0 text-stone-400" />
+            <span className="shrink-0" suppressHydrationWarning aria-hidden>
+              <LogOut className="h-[1.375rem] w-[1.375rem] shrink-0 text-stone-400" />
+            </span>
             <div>
               <p className="text-[0.9375rem] font-semibold">Sign out</p>
               <p className="text-xs text-stone-500">Leave Study Haul</p>
@@ -115,18 +138,25 @@ function SidebarButton({
   isActive: boolean;
   onClick: () => void;
 }) {
+  const mounted = useIsClientMounted();
+  const showActive = mounted && isActive;
+  const tap = useTapHandler(onClick);
+
   return (
     <button
       type="button"
-      onClick={onClick}
-      className={`flex w-full items-center gap-3.5 rounded-full px-4 py-3 text-left transition ${
-        isActive ? "nav-pill-active" : "text-stone-600 hover:bg-[var(--sh-primary-soft)]/60 hover:text-stone-900"
+      {...tap}
+      suppressHydrationWarning
+      className={`flex w-full items-center gap-3.5 rounded-full px-4 py-3 text-left transition touch-manipulation ${
+        showActive ? "nav-pill-active" : "text-stone-600 sidebar-nav-hover hover:text-stone-900"
       }`}
     >
-      <Icon
-        className={`h-[1.375rem] w-[1.375rem] shrink-0 ${isActive ? "text-[var(--sh-primary)]" : "text-stone-400"}`}
-      />
-      <div className="min-w-0">
+      <span className="shrink-0" suppressHydrationWarning aria-hidden>
+        <Icon
+          className={`h-[1.375rem] w-[1.375rem] ${showActive ? "text-brand" : "text-stone-400"}`}
+        />
+      </span>
+      <div className="min-w-0" suppressHydrationWarning>
         <p className="text-[0.9375rem] font-semibold leading-snug">{label}</p>
         <p className="text-xs leading-snug text-stone-500">{description}</p>
       </div>
@@ -148,10 +178,13 @@ function SidebarLink({
   return (
     <Link
       href={href}
-      className="flex w-full items-center gap-3.5 rounded-full px-4 py-3 text-left text-stone-600 transition hover:bg-[var(--sh-accent-soft)]/70 hover:text-stone-900"
+      suppressHydrationWarning
+      className="flex w-full items-center gap-3.5 rounded-full px-4 py-3 text-left text-stone-600 transition sidebar-link-hover hover:text-stone-900"
     >
-      <Icon className="h-[1.375rem] w-[1.375rem] shrink-0 text-[var(--sh-accent)]" />
-      <div className="min-w-0">
+      <span className="shrink-0" suppressHydrationWarning aria-hidden>
+        <Icon className="h-[1.375rem] w-[1.375rem] text-teal-600" />
+      </span>
+      <div className="min-w-0" suppressHydrationWarning>
         <p className="text-[0.9375rem] font-semibold leading-snug">{label}</p>
         <p className="text-xs leading-snug text-stone-500">{description}</p>
       </div>

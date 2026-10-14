@@ -8,7 +8,7 @@ export function HubPlanningNav({
   active?: PlanningNavActive;
 }) {
   return (
-    <nav className="flex max-w-full items-center gap-1 overflow-x-auto rounded-full border border-brand bg-brand-soft/80 p-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    <nav className="hub-planning-nav flex max-w-full items-center gap-1 overflow-x-auto rounded-full border border-brand p-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       <NavPill href="/dashboard" label="Hub" isActive={active === "hub"} />
       <NavPill href="/study" label="Study" isActive={active === "study"} />
       <NavPill href="/core" label="Core" isActive={active === "core"} />
@@ -30,16 +30,11 @@ function NavPill({
   return (
     <Link
       href={href}
-      className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
-        isActive
-          ? "bg-white shadow-sm ring-1 text-brand"
-          : "text-stone-600 hover:text-stone-900"
+      suppressHydrationWarning
+      data-hub-chrome
+      className={`inline-flex min-h-11 items-center rounded-full px-3 py-1.5 text-xs font-semibold transition touch-manipulation ${
+        isActive ? "nav-pill-active shadow-sm" : "text-stone-600 planning-nav-hover"
       }`}
-      style={
-        isActive
-          ? { color: "var(--sh-primary)", boxShadow: "inset 0 0 0 1px color-mix(in srgb, var(--sh-primary) 22%, transparent)" }
-          : undefined
-      }
     >
       {label}
     </Link>

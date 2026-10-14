@@ -30,6 +30,7 @@ export async function generateStudyTopicBreakdown(input: {
   title: string;
   focus?: string | null;
   subject?: string | null;
+  includeOpenAIPro?: boolean;
 }): Promise<Pick<StudyTopicProfile, "summary" | "subtopics" | "suggestedTechniques">> {
   const title = input.title.trim();
   if (!title) {
@@ -64,7 +65,7 @@ Rules:
 - Techniques should map to: notes, flashcards, quiz, explain simply, practice problems.`,
         },
       ],
-      { temperature: 0.35, maxTokens: 2048, jsonMode: true },
+      { temperature: 0.35, maxTokens: 2048, jsonMode: true, includeOpenAIPro: input.includeOpenAIPro },
     );
 
     const parsed = parseAiJson<{

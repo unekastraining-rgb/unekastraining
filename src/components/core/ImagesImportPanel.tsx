@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { ImagePlus, Upload } from "lucide-react";
 
+import { CoreChromeAction } from "@/components/core/CoreChromeAction";
+
 export function ImagesImportPanel({
   onInsert,
   compact = false,
@@ -21,6 +23,7 @@ export function ImagesImportPanel({
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async data load on mount or dependency change
     void load();
   }, [load]);
 
@@ -30,7 +33,8 @@ export function ImagesImportPanel({
       const form = new FormData();
       form.append("file", file);
       form.append("name", file.name.replace(/\.[^.]+$/, ""));
-      form.append("kind", "background");
+      // Page clip-art / photos — never page backgrounds (those live under Templates).
+      form.append("kind", "element");
       const res = await fetch("/api/customization/templates", { method: "POST", body: form });
       if (res.ok) {
         await load();
@@ -43,8 +47,13 @@ export function ImagesImportPanel({
   }
 
   const images = assets.filter(
-    (a) => a.kind === "background" || (a.kind !== "sticker" && a.mimeType.startsWith("image/")),
+    (a) =>
+      a.kind === "element" ||
+      a.kind === "background" ||
+      (a.kind !== "sticker" && a.kind !== "template" && a.mimeType.startsWith("image/")),
   );
+
+  const touchChip = compact ? " min-h-11 touch-manipulation" : "";
 
   return (
     <div className={compact ? "space-y-3" : "space-y-4"}>
@@ -57,7 +66,7 @@ export function ImagesImportPanel({
         ) : null}
       </div>
 
-      <label className="flex cursor-pointer flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-orange-200 bg-orange-50/40 px-4 py-6 transition hover:border-orange-300 hover:bg-orange-50/70">
+      <label className={`flex cursor-pointer flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-orange-200 bg-orange-50/40 px-4 py-6 transition hover:border-orange-300 hover:bg-orange-50/70${touchChip}`}>
         <Upload className="h-8 w-8 text-orange-500" />
         <span className="text-sm font-semibold text-stone-800">
           {uploading ? "Importing…" : "Import image"}
@@ -82,12 +91,12 @@ export function ImagesImportPanel({
           </p>
           <div className="grid grid-cols-3 gap-2">
             {images.map((asset) => (
-              <button
+              <CoreChromeAction
                 key={asset.id}
-                type="button"
-                onClick={() => onInsert(asset.id)}
-                className="group relative aspect-square overflow-hidden rounded-xl border border-stone-100 bg-stone-50"
+                onActivate={() => onInsert(asset.id)}
                 title={asset.name}
+                aria-label={`Insert ${asset.name}`}
+                className={`group relative aspect-square overflow-hidden rounded-xl border border-stone-100 bg-stone-50${touchChip}`}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
@@ -98,7 +107,7 @@ export function ImagesImportPanel({
                 <span className="absolute inset-x-0 bottom-0 truncate bg-black/50 px-1 py-0.5 text-[8px] font-semibold text-white">
                   {asset.name}
                 </span>
-              </button>
+              </CoreChromeAction>
             ))}
           </div>
         </div>

@@ -4,6 +4,7 @@ import { LMSProvider } from "@/generated/prisma";
 import { diagnoseBlackboardConnection } from "@/lib/lms/blackboard-diagnose";
 import { db } from "@/lib/db";
 import { getOrCreateDefaultUser } from "@/lib/user";
+import { openLmsToken } from "@/lib/security/lms-token-crypto";
 
 export async function POST(request: Request) {
   try {
@@ -20,7 +21,7 @@ export async function POST(request: Request) {
       "";
     const accessToken =
       (typeof body.accessToken === "string" && body.accessToken.trim()) ||
-      connection?.accessToken ||
+      openLmsToken(connection?.accessToken) ||
       "";
 
     if (!baseUrl || !accessToken) {

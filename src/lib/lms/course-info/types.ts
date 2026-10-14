@@ -25,6 +25,8 @@ export interface CourseInfoItem {
   title: string;
   body?: string;
   date?: string;
+  /** Recurring or window text when an ISO date is incomplete (e.g. "Each Sunday"). */
+  when?: string;
   kind: CourseInfoItemKind;
   source: CourseInfoSource;
   moodleRef?: {

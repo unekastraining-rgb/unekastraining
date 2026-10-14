@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
+import { withReadableCourse } from "@/lib/courses/display-name";
 import { emptyDocument } from "@/lib/core/note-types";
 import { getOrCreateDefaultUser } from "@/lib/user";
 
@@ -10,8 +11,13 @@ export async function GET() {
 
     const courses = await db.course.findMany({
       where: { userId: user.id },
-      orderBy: { createdAt: "desc" },
+      orderBy: { updatedAt: "desc" },
       include: {
+        topics: {
+          select: { name: true },
+          orderBy: { sortOrder: "asc" },
+          take: 24,
+        },
         materials: {
           select: {
             id: true,
@@ -19,6 +25,7 @@ export async function GET() {
             type: true,
             extractedText: true,
             filePath: true,
+            url: true,
           },
           orderBy: { sortOrder: "asc" },
         },
@@ -28,7 +35,13 @@ export async function GET() {
       },
     });
 
-    return NextResponse.json({ success: true, courses });
+    return NextResponse.json({
+      success: true,
+      courses: courses.map((course) => ({
+        ...withReadableCourse(course),
+        topics: course.topics.map((topic) => topic.name),
+      })),
+    });
   } catch (error) {
     console.error("Failed to fetch courses:", error);
     return NextResponse.json(
@@ -91,29 +104,43 @@ export async function DELETE(request: Request) {
   try {
     const user = await getOrCreateDefaultUser();
     const body = await request.json();
-    const { id } = body;
+    const rawIds = Array.isArray(body.ids)
+      ? body.ids
+      : body.id
+        ? [body.id]
+        : [];
+    const ids = rawIds
+      .map((value: unknown) => (typeof value === "string" ? value.trim() : ""))
+      .filter(Boolean);
 
-    if (!id) {
+    if (ids.length === 0) {
       return NextResponse.json(
         { success: false, error: "Course id is required." },
         { status: 400 },
       );
     }
 
-    const course = await db.course.findFirst({
-      where: { id, userId: user.id },
+    const owned = await db.course.findMany({
+      where: { id: { in: ids }, userId: user.id },
+      select: { id: true },
     });
+    const ownedIds = owned.map((c) => c.id);
 
-    if (!course) {
+    if (ownedIds.length === 0) {
       return NextResponse.json(
         { success: false, error: "Course not found." },
         { status: 404 },
       );
     }
 
-    await db.course.delete({ where: { id } });
+    await db.course.deleteMany({
+      where: { id: { in: ownedIds }, userId: user.id },
+    });
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({
+      success: true,
+      data: { deleted: ownedIds.length, ids: ownedIds },
+    });
   } catch (error) {
     console.error("Failed to delete course:", error);
     return NextResponse.json(

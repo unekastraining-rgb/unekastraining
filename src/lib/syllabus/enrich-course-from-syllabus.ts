@@ -2,9 +2,11 @@ import { MaterialType } from "@/generated/prisma";
 import { aiService } from "@/lib/ai";
 import { isAIConfigured } from "@/lib/ai/is-configured";
 import { parseAiJson } from "@/lib/ai/parse-json-response";
+import { isMetaSyllabusTopic } from "@/lib/csl/six-worked-lesson";
 import { db } from "@/lib/db";
 import { parseCurriculumFromMaterial } from "@/lib/grade-school/learning-plan";
 import { getOrCreateUserPreferences } from "@/lib/preferences";
+import { getUserAppSettings } from "@/lib/settings/app-settings";
 import { generateCurriculumFromSyllabus } from "@/lib/syllabus/generate-curriculum-from-syllabus";
 import { parseSyllabusText } from "@/lib/syllabus/parse";
 import { parseStudyTopicFromMaterial } from "@/lib/study-topic/parse";
@@ -12,23 +14,78 @@ import type { StudyTopicProfile, StudyTopicSubtopic } from "@/lib/study-topic/ty
 
 export const SYLLABUS_PLAN_MATERIAL_TITLE = "AI learning plan";
 
-function chapterSubtopicsFromText(syllabusText: string): StudyTopicSubtopic[] {
+const OUTLINE_SECTION =
+  /^(chapters?|units?|modules?|topics?|weekly\s+schedule|course\s+outline|schedule)$/i;
+const SKIP_SECTION =
+  /^(learning\s+outcomes?|course\s+outcomes?|objectives?|policies?|grading|attendance|materials?|module\s+outline)$/i;
+
+function normalizeOutlineTitle(raw: string): string {
+  return raw
+    .replace(/^week\s+\d+\s*:\s*/i, "")
+    .replace(/^module\s+\d+\s*:\s*/i, "")
+    .replace(/&amp;/g, "&")
+    .trim();
+}
+
+function parseOutlineLine(line: string): string | null {
+  const bullet = line.match(/^[-*]\s+(.+)/);
+  if (bullet?.[1]) return bullet[1].trim();
+  const numbered = line.match(/^\d+\.\s+(.+)/);
+  if (numbered?.[1]) return numbered[1].trim();
+  return null;
+}
+
+function pushOutlineTopic(chapters: StudyTopicSubtopic[], rawTitle: string) {
+  const title = normalizeOutlineTitle(rawTitle);
+  if (!title || title.length < 3 || title.length > 120) return;
+  if (SKIP_SECTION.test(title) || OUTLINE_SECTION.test(title)) return;
+  if (isMetaSyllabusTopic(title)) return;
+  chapters.push({
+    name: title.slice(0, 120),
+    description: `Study material from your syllabus: ${title}`,
+  });
+}
+
+/**
+ * Pull study topics from syllabus outline bullets (Chapters / Units / Modules).
+ * Deterministic cold start — no AI required when the syllabus lists sections.
+ */
+export function chapterSubtopicsFromText(syllabusText: string): StudyTopicSubtopic[] {
   const lines = syllabusText.split("\n");
   const chapters: StudyTopicSubtopic[] = [];
+  let inOutlineSection = false;
+  let inModuleOutline = false;
 
   for (const line of lines) {
-    const bullet = line.match(/^[-*]\s+(.+)/);
+    const trimmed = line.trim();
+    if (/^module outline$/i.test(trimmed)) {
+      inModuleOutline = true;
+      continue;
+    }
+
     const heading = line.match(/^##\s+(.+)/);
-    const title = (bullet?.[1] ?? heading?.[1] ?? "").replace(/&amp;/g, "&").trim();
-    if (!title || title.length < 3) continue;
-    if (/^chapters?$/i.test(title)) continue;
-    chapters.push({
-      name: title.slice(0, 120),
-      description: `Study material from your syllabus: ${title}`,
-    });
+    if (heading) {
+      const name = heading[1].replace(/&amp;/g, "&").trim();
+      inOutlineSection = OUTLINE_SECTION.test(name);
+      inModuleOutline = /^modules?$/i.test(name);
+      continue;
+    }
+
+    if (!inOutlineSection && !inModuleOutline) continue;
+
+    const parsed = parseOutlineLine(line);
+    if (parsed) pushOutlineTopic(chapters, parsed);
   }
 
-  return chapters.slice(0, 10);
+  // Flat lists with no ## heading (Canvas module dumps, numbered weeks).
+  if (chapters.length === 0) {
+    for (const line of lines) {
+      const parsed = parseOutlineLine(line);
+      if (parsed) pushOutlineTopic(chapters, parsed);
+    }
+  }
+
+  return chapters.slice(0, 24);
 }
 
 function fallbackStudyPlan(input: {
@@ -64,7 +121,18 @@ async function generateCollegeStudyPlanFromSyllabus(input: {
   courseTitle: string;
   courseCode?: string | null;
   syllabusText: string;
+  includeOpenAIPro?: boolean;
 }): Promise<Pick<StudyTopicProfile, "summary" | "subtopics" | "suggestedTechniques">> {
+  // Prefer explicit chapter/unit lists for instant cold start (no AI wait).
+  const outlineTopics = chapterSubtopicsFromText(input.syllabusText);
+  if (outlineTopics.length >= 3) {
+    return {
+      summary: `Use your imported syllabus for ${input.courseTitle}${input.courseCode ? ` (${input.courseCode})` : ""} to guide weekly study, assignments, and exam prep.`,
+      subtopics: outlineTopics,
+      suggestedTechniques: fallbackStudyPlan(input).suggestedTechniques,
+    };
+  }
+
   if (!isAIConfigured()) {
     return fallbackStudyPlan(input);
   }
@@ -97,7 +165,12 @@ Rules:
 - Do not invent assignments with specific dates unless they appear in the syllabus.`,
         },
       ],
-      { temperature: 0.3, maxTokens: 4096, jsonMode: true },
+      {
+        temperature: 0.3,
+        maxTokens: 4096,
+        jsonMode: true,
+        includeOpenAIPro: input.includeOpenAIPro,
+      },
     );
 
     const parsed = parseAiJson<{
@@ -147,11 +220,110 @@ async function upsertTopics(
   return created;
 }
 
+/** Deterministic cold-start topic seed when AI enrich skips or returns zero. */
+export async function seedTopicsFromSyllabusOutline(
+  courseId: string,
+  syllabusText: string,
+): Promise<number> {
+  const subtopics = chapterSubtopicsFromText(syllabusText);
+  if (subtopics.length === 0) return 0;
+  return upsertTopics(courseId, subtopics);
+}
+
+const GENERIC_FALLBACK_TOPIC_NAMES = [
+  "Course outcomes",
+  "Readings & modules",
+  "Assignments & projects",
+  "Exams & quizzes",
+  "General",
+] as const;
+
+function isUsableStudyTopic(name: string): boolean {
+  const trimmed = name.trim();
+  if (!trimmed || /^general$/i.test(trimmed)) return false;
+  return !isMetaSyllabusTopic(trimmed);
+}
+
+/**
+ * Re-seed topics from imported syllabus/module text when a course has none
+ * or only thin/meta topics (common after LMS sync on another device or older imports).
+ * Returns how many topics were created (0 if already usable enough).
+ */
+export async function backfillCourseTopicsIfEmpty(courseId: string): Promise<number> {
+  const existing = await db.topic.findMany({
+    where: { courseId },
+    select: { name: true },
+    take: 40,
+  });
+  const usableCount = existing.filter((topic) => isUsableStudyTopic(topic.name)).length;
+  // Keep packs cold-startable: backfill when under 3 real content topics.
+  if (usableCount >= 3) return 0;
+
+  const material = await db.courseMaterial.findFirst({
+    where: {
+      courseId,
+      OR: [
+        { type: MaterialType.SYLLABUS },
+        { type: MaterialType.DOCUMENT },
+        { type: MaterialType.LECTURE_SLIDES },
+      ],
+    },
+    orderBy: { updatedAt: "desc" },
+    select: { extractedText: true },
+  });
+  const text = material?.extractedText?.trim() ?? "";
+  if (!text) return 0;
+
+  if (existing.length > 0) {
+    await db.topic.deleteMany({
+      where: {
+        courseId,
+        name: { in: [...GENERIC_FALLBACK_TOPIC_NAMES] },
+      },
+    });
+  }
+
+  return seedTopicsFromSyllabusOutline(courseId, text);
+}
+
+/** Seed syllabus topics for every course belonging to a user when lists are thin (cold start). */
+export async function backfillUserCourseTopicsIfEmpty(userId: string): Promise<void> {
+  const courseIds = await db.course.findMany({
+    where: { userId },
+    select: { id: true },
+  });
+  await Promise.all(courseIds.map((course) => backfillCourseTopicsIfEmpty(course.id)));
+}
+
 export interface EnrichCourseFromSyllabusResult {
   planGenerated: boolean;
   topicsCreated: number;
   mode: "college" | "grade_school";
   parser?: string;
+}
+
+async function countNonGeneralTopics(courseId: string): Promise<number> {
+  const topics = await db.topic.findMany({
+    where: { courseId },
+    select: { name: true },
+    take: 40,
+  });
+  return topics.filter((topic) => topic.name.trim() && !/^general$/i.test(topic.name))
+    .length;
+}
+
+/**
+ * When a plan material already exists, avoid re-running AI — but still seed topics
+ * if the course has none (Canvas re-sync / cold-start gap).
+ */
+export function resolveSyllabusEnrichMode(input: {
+  force?: boolean;
+  hasUsablePlan: boolean;
+  nonGeneralTopicCount: number;
+}): "full" | "skip" | "topics_from_plan" {
+  if (input.force || !input.hasUsablePlan) return "full";
+  if (input.nonGeneralTopicCount > 0) return "skip";
+  return "topics_from_plan";
 }
 
 export async function enrichCourseFromSyllabus(input: {
@@ -170,6 +342,7 @@ export async function enrichCourseFromSyllabus(input: {
 
   const preferences = await getOrCreateUserPreferences(input.userId);
   const elementaryMode = preferences.elementaryMode;
+  const appSettings = await getUserAppSettings(input.userId);
 
   const existingPlanMaterial = await db.courseMaterial.findFirst({
     where: {
@@ -178,16 +351,52 @@ export async function enrichCourseFromSyllabus(input: {
     },
   });
 
-  if (existingPlanMaterial && !input.force) {
-    const hasCollegePlan = parseStudyTopicFromMaterial(existingPlanMaterial.extractedText);
-    const hasGradePlan = parseCurriculumFromMaterial(existingPlanMaterial.extractedText);
-    if (hasCollegePlan || hasGradePlan) {
+  const collegePlan = existingPlanMaterial
+    ? parseStudyTopicFromMaterial(existingPlanMaterial.extractedText)
+    : null;
+  const gradePlan = existingPlanMaterial
+    ? parseCurriculumFromMaterial(existingPlanMaterial.extractedText)
+    : null;
+  const hasUsablePlan = Boolean(collegePlan || gradePlan);
+  const nonGeneralTopicCount = await countNonGeneralTopics(input.courseId);
+  const mode = resolveSyllabusEnrichMode({
+    force: input.force,
+    hasUsablePlan,
+    nonGeneralTopicCount,
+  });
+
+  if (mode === "skip") {
+    return {
+      planGenerated: false,
+      topicsCreated: 0,
+      mode: elementaryMode ? "grade_school" : "college",
+    };
+  }
+
+  if (mode === "topics_from_plan") {
+    if (collegePlan?.subtopics?.length) {
+      const topicsCreated = await upsertTopics(input.courseId, collegePlan.subtopics);
       return {
         planGenerated: false,
-        topicsCreated: 0,
-        mode: elementaryMode ? "grade_school" : "college",
+        topicsCreated,
+        mode: "college",
       };
     }
+    if (gradePlan?.topics?.length) {
+      const topicsCreated = await upsertTopics(
+        input.courseId,
+        gradePlan.topics.map((topic) => ({
+          name: topic.name,
+          description: topic.description,
+        })),
+      );
+      return {
+        planGenerated: false,
+        topicsCreated,
+        mode: "grade_school",
+      };
+    }
+    // Plan unreadable — fall through to full enrich from syllabus text.
   }
 
   if (elementaryMode) {
@@ -196,6 +405,7 @@ export async function enrichCourseFromSyllabus(input: {
       courseName: input.courseTitle,
       courseCode: input.courseCode,
       gradeLevel: "Auto",
+      includeOpenAIPro: appSettings.aiUseOpenAIPro,
     });
 
     const planJson = JSON.stringify(curriculum, null, 2);
@@ -246,12 +456,14 @@ export async function enrichCourseFromSyllabus(input: {
 
   const { extraction, parser } = await parseSyllabusText(text, {
     fileName: input.courseCode ?? input.courseTitle,
+    includeOpenAIPro: appSettings.aiUseOpenAIPro,
   });
 
   const breakdown = await generateCollegeStudyPlanFromSyllabus({
     courseTitle: input.courseTitle,
     courseCode: input.courseCode,
     syllabusText: text,
+    includeOpenAIPro: appSettings.aiUseOpenAIPro,
   });
 
   const profile: StudyTopicProfile = {

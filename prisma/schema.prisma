@@ -79,6 +79,7 @@ enum QuizQuestionType {
   TRUE_FALSE
   SHORT_ANSWER
   SCENARIO
+  FILL_IN_BLANK
 }
 
 enum QuizSource {
@@ -110,11 +111,73 @@ enum ProposalStatus {
   REJECTED
 }
 
+/** Universal Learning Engine — LearningSpace kinds (Course is one specialized kind). */
+enum LearningSpaceKind {
+  COURSE
+  CLASS
+  TRAINING
+  GOAL
+  HOBBY
+  CERTIFICATION
+  SELF_DIRECTED
+  EVERYDAY
+}
+
+/** Faceted mastery — foundational ULE contract. */
+enum MasteryFacet {
+  RECOGNIZE
+  EXPLAIN
+  APPLY
+  SOLVE
+  PERFORM
+  RETAIN
+}
+
+/** Universal activity types (extensible; quiz is the Phase 2A producer). */
+enum LearningObjectType {
+  EXPLANATION
+  QUIZ_ITEM
+  FLASHCARD
+  FEYNMAN
+  VISUALIZATION
+  HANDS_ON_PRACTICE
+  ACTIVE_RECALL
+  TUTOR_TURN
+  CODING_CHALLENGE
+  SQL_CHALLENGE
+  SIMULATION
+  GAME
+  WRITING_EXERCISE
+  PROJECT_TASK
+  PRESENTATION_PRACTICE
+  LAB
+  RETENTION_ITEM
+  OTHER
+}
+
+enum EvidenceOutcome {
+  SUCCESS
+  PARTIAL
+  FAIL
+  ABANDONED
+}
+
+/** Concept↔Concept edges (Phase 2E-2). First-class; not stored in metadataJson. */
+enum ConceptRelationshipType {
+  PREREQUISITE
+  RELATED
+  CONFUSABLE_WITH
+  PART_OF
+}
+
 model User {
   id        String   @id @default(cuid())
   email     String   @unique
   name      String?
   avatarUrl String?
+  /** Base64 image bytes so the photo follows the account across web/mobile (not disk-only). */
+  avatarData String?
+  avatarMime String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -136,6 +199,47 @@ model User {
   collabBoards     CollabBoard[]
   mediaAssets      UserMediaAsset[]
   resources        Resource[]
+  learnerProfile   LearnerProfile?
+  learningSpaces   LearningSpace[]
+  concepts              Concept[]
+  learningObjects       LearningObject[]
+  learningAttempts      LearningAttempt[]
+  conceptMasteries      ConceptMastery[]
+  retentionItems        RetentionItem[]
+  conceptRelationships  ConceptRelationship[]
+  adaptiveSequenceRuns  AdaptiveSequenceRun[]
+  betaFeedbacks         BetaFeedback[]
+  /** Phase 4A — Knowledge Library–aligned learning evidence (not ULE LearningAttempt). */
+  knowledgeConceptEvidence KnowledgeConceptEvidence[]
+  knowledgeConceptStates   KnowledgeConceptState[]
+}
+
+/** Controlled-beta learner feedback — never LearningAttempt / ConceptMastery. */
+enum BetaFeedbackCategory {
+  CONFUSING
+  BROKEN
+  TOO_EASY
+  TOO_HARD
+  NOT_RELEVANT
+  GREAT
+  OTHER
+}
+
+model BetaFeedback {
+  id              String              @id @default(cuid())
+  userId          String
+  category        BetaFeedbackCategory
+  comment         String
+  /** Optional learner-facing surface key (e.g. study-hub, adaptive, lucky). */
+  surface         String?
+  /** Optional activity/content id — not evidence. */
+  activityRef     String?
+  createdAt       DateTime            @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([category, createdAt])
 }
 
 model UserMediaAsset {
@@ -240,6 +344,8 @@ model Course {
   quizzes       Quiz[]
   missedQuestions MissedQuestion[]
   gradeSchoolProgress GradeSchoolStepProgress[]
+  /** Optional 1:1 projection into universal LearningSpace (kind=COURSE). Additive. */
+  learningSpace LearningSpace?
 
   @@unique([userId, code])
   @@index([userId])
@@ -399,12 +505,15 @@ model Topic {
   sortOrder   Int      @default(0)
   courseId    String
   parentId    String?
+  /** Additive map onto universal Concept (knowledge atom). Topic remains intact. */
+  conceptId   String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   course        Course          @relation(fields: [courseId], references: [id], onDelete: Cascade)
   parent        Topic?          @relation("TopicHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
   children      Topic[]         @relation("TopicHierarchy")
+  concept       Concept?        @relation(fields: [conceptId], references: [id], onDelete: SetNull)
   notes         Note[]
   masteries     TopicMastery[]
   flashcards    Flashcard[]
@@ -414,6 +523,7 @@ model Topic {
 
   @@index([courseId])
   @@index([parentId])
+  @@index([conceptId])
 }
 
 model Note {
@@ -641,4 +751,332 @@ model ScheduleProposal {
 
   @@index([userId])
   @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Universal Learning Engine foundations (Phase 2A) — additive only
+// ---------------------------------------------------------------------------
+
+model LearnerProfile {
+  id                            String   @id @default(cuid())
+  userId                        String   @unique
+  goalsJson                     String   @default("[]")
+  ageBand                       String?
+  persona                       String?
+  educationLevel                String?
+  modalityPreferencesJson       String   @default("{}")
+  accessibilityPreferencesJson  String   @default("{}")
+  settingsJson                  String   @default("{}")
+  createdAt                     DateTime @default(now())
+  updatedAt                     DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model LearningSpace {
+  id            String            @id @default(cuid())
+  userId        String
+  kind          LearningSpaceKind
+  title         String
+  description   String?
+  subjectDomain String?
+  /** When set, this space is the Course projection (kind should be COURSE). */
+  courseId      String?           @unique
+  metadataJson  String            @default("{}")
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course          Course?          @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  concepts        Concept[]
+  learningObjects LearningObject[]
+
+  @@index([userId])
+  @@index([userId, kind])
+}
+
+model Concept {
+  id               String   @id @default(cuid())
+  userId           String
+  learningSpaceId  String?
+  title            String
+  description      String?
+  subjectDomain    String?
+  difficulty       Float?
+  metadataJson     String   @default("{}")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  learningSpace    LearningSpace?    @relation(fields: [learningSpaceId], references: [id], onDelete: SetNull)
+  topics           Topic[]
+  learningAttempts LearningAttempt[]
+  masteries        ConceptMastery[]
+  retentionItems   RetentionItem[]
+  relationshipsFrom ConceptRelationship[] @relation("ConceptRelationshipFrom")
+  relationshipsTo   ConceptRelationship[] @relation("ConceptRelationshipTo")
+  adaptiveSequenceRuns AdaptiveSequenceRun[]
+
+  @@index([userId])
+  @@index([learningSpaceId])
+  @@index([userId, title])
+}
+
+/**
+ * First-class Concept↔Concept relationship (Phase 2E-2).
+ * Directional store; RELATED / CONFUSABLE_WITH are normalized to a canonical endpoint order.
+ * PREREQUISITE: fromConcept requires toConcept.
+ * PART_OF: fromConcept is part of toConcept.
+ */
+model ConceptRelationship {
+  id            String                   @id @default(cuid())
+  userId        String
+  fromConceptId String
+  toConceptId   String
+  type          ConceptRelationshipType
+  confidence    Float?
+  /** Provenance label, e.g. MANUAL | CORE_EXTRACT | AI | TOPIC | IMPORT | SYSTEM */
+  sourceType    String?
+  sourceId      String?
+  metadataJson  String                   @default("{}")
+  createdAt     DateTime                 @default(now())
+  updatedAt     DateTime                 @updatedAt
+
+  user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fromConcept Concept @relation("ConceptRelationshipFrom", fields: [fromConceptId], references: [id], onDelete: Cascade)
+  toConcept   Concept @relation("ConceptRelationshipTo", fields: [toConceptId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, fromConceptId, toConceptId, type])
+  @@index([userId])
+  @@index([fromConceptId])
+  @@index([toConceptId])
+  @@index([userId, type])
+  @@index([userId, fromConceptId, type])
+  @@index([userId, toConceptId, type])
+}
+
+model LearningObject {
+  id                           String             @id @default(cuid())
+  userId                       String
+  learningSpaceId              String?
+  type                         LearningObjectType
+  title                        String?
+  conceptIdsJson               String             @default("[]")
+  prerequisiteConceptIdsJson   String             @default("[]")
+  skillFacet                   MasteryFacet       @default(RECOGNIZE)
+  difficulty                   Float?
+  sixTechnique                 String?
+  successCriteriaJson          String             @default("{}")
+  expectedEvidenceJson         String             @default("{}")
+  /** Source activity pointer, e.g. { kind, quizId, questionId }. */
+  payloadRefJson               String             @default("{}")
+  createdAt                    DateTime           @default(now())
+  updatedAt                    DateTime           @updatedAt
+
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  learningSpace    LearningSpace?    @relation(fields: [learningSpaceId], references: [id], onDelete: SetNull)
+  learningAttempts LearningAttempt[]
+
+  @@index([userId])
+  @@index([learningSpaceId])
+  @@index([type])
+}
+
+model LearningAttempt {
+  id                         String          @id @default(cuid())
+  userId                     String
+  learningObjectId           String
+  conceptId                  String?
+  skillFacet                 MasteryFacet
+  outcome                    EvidenceOutcome
+  score                      Float?
+  confidence                 Float?
+  misconceptionSignalsJson   String          @default("[]")
+  sourceRefJson              String          @default("{}")
+  evidencePayloadJson        String          @default("{}")
+  startedAt                  DateTime        @default(now())
+  endedAt                    DateTime?
+  createdAt                  DateTime        @default(now())
+
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  learningObject LearningObject @relation(fields: [learningObjectId], references: [id], onDelete: Cascade)
+  concept        Concept?       @relation(fields: [conceptId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([learningObjectId])
+  @@index([conceptId])
+  @@index([userId, conceptId])
+  @@index([createdAt])
+}
+
+model ConceptMastery {
+  id             String    @id @default(cuid())
+  userId         String
+  conceptId      String
+  recognize      Float     @default(0)
+  explain        Float     @default(0)
+  apply          Float     @default(0)
+  solve          Float     @default(0)
+  perform        Float     @default(0)
+  retain         Float     @default(0)
+  confidence     Float     @default(0)
+  reviewCount    Int       @default(0)
+  lastReviewedAt DateTime?
+  nextReviewAt   DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  concept Concept @relation(fields: [conceptId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, conceptId])
+  @@index([userId])
+  @@index([conceptId])
+  @@index([nextReviewAt])
+}
+
+/**
+ * Adaptive sequence RUN status (Phase 2G-2).
+ * ABANDONED = run abandoned — not LearningAttempt.outcome FAIL.
+ */
+enum AdaptiveSequenceRunStatus {
+  ACTIVE
+  COMPLETED
+  ABANDONED
+}
+
+/**
+ * Thin coordination cursor for an adaptive learning run (Phase 2G-2).
+ * Does not store evidence, mastery, answers, or retention state.
+ * lastAttemptId is a scalar pointer only (no FK) so deleting a run never cascades to LearningAttempt.
+ */
+model AdaptiveSequenceRun {
+  id                       String                    @id @default(cuid())
+  userId                   String
+  conceptId                String
+  status                   AdaptiveSequenceRunStatus @default(ACTIVE)
+  /** Zero-based index into stepsJson. */
+  currentStepIndex         Int                       @default(0)
+  /** Ordered step descriptors: [{ learningObjectId?, intervention }]. */
+  stepsJson                String                    @default("[]")
+  /** Lightweight history: [{ stepIndex, intervention, learningObjectId?, attemptId? }]. */
+  interventionHistoryJson  String                    @default("[]")
+  /** Optional LearningAttempt id pointer — scalar only, no FK. */
+  lastAttemptId            String?
+  createdAt                DateTime                  @default(now())
+  updatedAt                DateTime                  @updatedAt
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  concept Concept @relation(fields: [conceptId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([conceptId])
+  @@index([userId, status])
+  @@index([userId, conceptId])
+}
+
+enum RetentionSourceType {
+  MISSED_QUESTION
+  FLASHCARD
+  WEAK_MASTERY
+  TUTOR_FLAG
+  MASTERY_DECAY
+}
+
+enum RetentionStatus {
+  ACTIVE
+  DUE
+  COMPLETED
+  SUSPENDED
+}
+
+enum RetentionOutcome {
+  SUCCESS
+  PARTIAL
+  FAIL
+  SKIPPED
+}
+
+/** LUCKY retention source of truth (Phase 2C). Additive; does not replace SM-2 flashcards. */
+model RetentionItem {
+  id             String              @id @default(cuid())
+  userId         String
+  conceptId      String?
+  sourceType     RetentionSourceType
+  /** Stable id of source row (missedQuestionId, flashcardId, conceptId for weak mastery, …). */
+  sourceRef      String
+  status         RetentionStatus     @default(ACTIVE)
+  dueAt          DateTime?
+  priority       Float               @default(0.5)
+  reviewCount    Int                 @default(0)
+  lastOutcome    RetentionOutcome?
+  lastReviewedAt DateTime?
+  metadataJson   String              @default("{}")
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  concept Concept? @relation(fields: [conceptId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, sourceType, sourceRef])
+  @@index([userId])
+  @@index([userId, dueAt])
+  @@index([userId, status, priority])
+  @@index([conceptId])
+  @@index([sourceType])
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4A — Knowledge Library learner evidence / concept state
+// conceptId is a Knowledge Library string id (e.g. java-arraylist), NOT a
+// Prisma Concept cuid. Separate from LearningAttempt / ConceptMastery.
+// ---------------------------------------------------------------------------
+
+model KnowledgeConceptEvidence {
+  id           String   @id @default(cuid())
+  userId       String
+  /** lesson_exposure | practice_attempt | check_attempt | recall_result */
+  type         String
+  /** Knowledge Library concept id when mapped; null = unmapped observation. */
+  conceptId    String?
+  domain       String?
+  subject      String?
+  /** correct | incorrect | completed | attempted */
+  outcome      String?
+  occurredAt   DateTime @default(now())
+  source       String?
+  /** Optional idempotency key — unique per user when present. */
+  eventKey     String?
+  metadataJson String   @default("{}")
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, eventKey])
+  @@index([userId])
+  @@index([userId, conceptId])
+  @@index([userId, occurredAt])
+  @@index([conceptId])
+  @@index([type])
+}
+
+model KnowledgeConceptState {
+  id             String    @id @default(cuid())
+  userId         String
+  /** Knowledge Library concept id (e.g. java-arraylist). */
+  conceptId      String
+  exposureCount  Int       @default(0)
+  attemptCount   Int       @default(0)
+  correctCount   Int       @default(0)
+  incorrectCount Int       @default(0)
+  lastSeenAt     DateTime?
+  lastOutcome    String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, conceptId])
+  @@index([userId])
+  @@index([conceptId])
 }

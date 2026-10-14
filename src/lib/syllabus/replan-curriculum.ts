@@ -107,6 +107,7 @@ export async function replanCurriculum(input: {
   curriculum: GeneratedCurriculum;
   completedSteps: number[];
   parentNotes?: string | null;
+  includeOpenAIPro?: boolean;
 }): Promise<GeneratedCurriculum> {
   const { curriculum, completedSteps } = input;
   const trackSummary = summarizeTrackProgress(
@@ -161,7 +162,7 @@ export async function replanCurriculum(input: {
       },
       { role: "user", content: `${REPLAN_PROMPT}\n\n${userPrompt}` },
     ],
-    { temperature: 0.35, maxTokens: 10000, jsonMode: true },
+    { temperature: 0.35, maxTokens: 10000, jsonMode: true, includeOpenAIPro: input.includeOpenAIPro },
   );
 
   const parsed = parseAiJson<GeneratedCurriculum>(

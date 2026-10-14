@@ -48,7 +48,8 @@ export function HubInsightsPanel({
               <li key={item.id}>
                 <Link
                   href={item.href}
-                  className={`flex items-center justify-between gap-3 rounded-xl border px-3 py-2.5 text-sm transition hover:opacity-90 ${SEVERITY_STYLES[item.severity]}`}
+                  data-hub-chrome
+                  className={`flex min-h-11 items-center justify-between gap-3 rounded-xl border px-3 py-2.5 text-sm transition hover:opacity-90 touch-manipulation ${SEVERITY_STYLES[item.severity]}`}
                 >
                   <div className="min-w-0">
                     <p className="font-semibold">{item.title}</p>
@@ -71,7 +72,10 @@ export function HubInsightsPanel({
           <h2 className="text-lg font-bold text-stone-900">Progress</h2>
         </div>
         <div className="mt-4 grid grid-cols-2 gap-3">
-          <ProgressStat label="Overall mastery" value={`${progress.overallMastery}%`} />
+          <ProgressStat
+            label="Topic progress"
+            value={`${progress.overallMastery}%`}
+          />
           <ProgressStat label="Topics tracked" value={String(progress.topicsTracked)} />
           <ProgressStat label="Reviews this week" value={String(progress.reviewsThisWeek)} />
           <ProgressStat label="Quizzes taken" value={String(progress.quizAttempts)} />
@@ -145,8 +149,12 @@ export function HubInsightsPanel({
 
         <div className="mt-4 flex flex-wrap gap-3">
           <Link
-            href="/study"
-            className="inline-flex items-center gap-1 text-sm font-semibold text-brand hover:underline"
+            href={
+              topCourse?.courseId
+                ? `/study?courseId=${encodeURIComponent(topCourse.courseId)}`
+                : "/study"
+            }
+            className="inline-flex min-h-11 items-center gap-1 text-sm font-semibold text-brand hover:underline touch-manipulation"
           >
             Study now <ArrowRight className="h-4 w-4" />
           </Link>

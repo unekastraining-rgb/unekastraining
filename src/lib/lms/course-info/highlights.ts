@@ -1,12 +1,22 @@
 import type { CourseInfoPortal } from "./types";
 import { parseCourseInfoPortal } from "./types";
-import { extractSyllabusDateItemsFromText, isImportantSyllabusEvent } from "./syllabus-dates";
+import {
+  classifyScheduleTitle,
+  extractSyllabusDateItemsFromText,
+  extractWhenLabel,
+  hasScheduleTiming,
+  isJunkDateTitle,
+  isSemesterDateTitle,
+  shortEventTitle,
+  type ScheduleBucket,
+} from "./syllabus-dates";
 import { buildWeeklyHaulFromPortal, type WeeklyHaulBlock } from "./weekly-schedule";
 
 export interface CourseHighlightDate {
   id: string;
   title: string;
   date?: string;
+  when?: string;
   daysUntil?: number;
 }
 
@@ -28,11 +38,9 @@ export interface CourseHighlights {
 }
 
 const ASSESSMENT_PATTERN =
-  /\b(quiz|assessment|exam|midterm|mid-term|final|pre-course|post-course)\b/i;
+  /\b(quiz|assessment|exam|midterm|mid-term|final exam|pre-course|post-course|test\s*\d|final project)\b/i;
 const ROUTINE_WORK_PATTERN =
   /\b(podcast|business plan|presentation|portfolio|summary)\b/i;
-const TRUE_IMPORTANT_DATE_PATTERN =
-  /\b(zoom|live\s+session|virtual|webinar|withdraw|drop|last day|holiday|break|no\s+class|aea|proctored|office\s+hours|academic calendar)\b/i;
 const PROSE_PATTERN =
   /\b(subchapter|following|you will find|details about|once leads|long-term success|grade breakdown)\b/i;
 const GENERIC_DATE_SECTION_TITLE =
@@ -47,11 +55,19 @@ interface AssignmentLike {
 }
 
 function daysUntil(iso: string): number {
-  const target = new Date(iso);
+  const target = parseHeadlineDate(iso);
   const now = new Date();
   now.setHours(0, 0, 0, 0);
   target.setHours(0, 0, 0, 0);
   return Math.round((target.getTime() - now.getTime()) / 86_400_000);
+}
+
+function parseHeadlineDate(iso: string): Date {
+  const dateOnly = iso.match(/^(\d{4})-(\d{2})-(\d{2})(?:T|$)/);
+  if (dateOnly) {
+    return new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]));
+  }
+  return new Date(iso);
 }
 
 function normalizeTitle(title: string): string {
@@ -76,17 +92,13 @@ function looksLikeProse(title: string): boolean {
   return title.length > 110 || PROSE_PATTERN.test(title);
 }
 
-
-function isImportantEventTitle(title: string): boolean {
-  if (isRoutineWork(title)) return false;
-  if (looksLikeProse(title)) return false;
-  if (isImportantSyllabusEvent(title)) return true;
-  return TRUE_IMPORTANT_DATE_PATTERN.test(title);
-}
-
 function isImportantAssessment(title: string, kind?: string): boolean {
+  if (isJunkDateTitle(title)) return false;
   if (looksLikeProse(title)) return false;
   if (isRoutineWork(title)) return false;
+  if (isSemesterDateTitle(title)) return false;
+  if (/\bmodule\s+\d+\s+quiz\b/i.test(title)) return false;
+  if (/\bfinal grades?\b/i.test(title)) return false;
   if (kind === "QUIZ" || kind === "TEST") return true;
   return ASSESSMENT_PATTERN.test(title);
 }
@@ -203,7 +215,9 @@ interface ImportantDateEntry {
   id: string;
   title: string;
   date?: string;
+  when?: string;
   sourceType: string;
+  bucket: ScheduleBucket;
 }
 
 function collectImportantDateEntries(
@@ -213,23 +227,37 @@ function collectImportantDateEntries(
 ): ImportantDateEntry[] {
   const entries: ImportantDateEntry[] = [];
   const seen = new Set<string>();
-  const pushEntry = (title: string, date?: string, suffix = "") => {
-    const trimmed = title.trim();
+  const pushEntry = (
+    title: string,
+    date: string | undefined,
+    suffix: string,
+    when: string | undefined,
+    bucket: ScheduleBucket,
+  ) => {
+    const trimmed = shortEventTitle(title);
     if (!trimmed || trimmed.length < 4) return;
-    const key = titleKey(trimmed);
+    if (isJunkDateTitle(title) || isJunkDateTitle(trimmed)) return;
+    if (looksLikeProse(title)) return;
+    if (!date && !when && !hasScheduleTiming(title)) return;
+    const key = `${bucket}:${titleKey(trimmed)}`;
     if (seen.has(key)) return;
     seen.add(key);
     entries.push({
       id: `important-date-${index}-${key.slice(0, 24)}${suffix}`,
       title: trimmed,
       date,
+      when: when ?? extractWhenLabel(title),
       sourceType: item.source.type,
+      bucket,
     });
   };
 
   const isGenericChapterTitle = GENERIC_DATE_SECTION_TITLE.test(item.title.trim());
   if (!isGenericChapterTitle) {
-    pushEntry(item.title, item.date, "-title");
+    const bucket = classifyScheduleTitle(item.title);
+    if (bucket) {
+      pushEntry(item.title, item.date, "-title", item.when ?? extractWhenLabel(item.title), bucket);
+    }
   }
 
   if (item.body?.trim()) {
@@ -239,23 +267,11 @@ function collectImportantDateEntries(
       inferPortalYear(portal),
     );
     for (const line of extracted) {
-      pushEntry(line.title, line.date, "-extracted");
-    }
-
-    for (const rawLine of item.body.split(/\n/)) {
-      const line = rawLine.replace(/^[\s•\-*\d.)]+/, "").trim();
-      if (line.length < 8 || line.length > 200) continue;
-      if (!isImportantEventTitle(line) && !isImportantAssessment(line)) continue;
-      pushEntry(line, findDateInLine(line, inferPortalYear(portal)) ?? undefined, "-line");
+      pushEntry(line.title, line.date, "-extracted", line.when, line.bucket);
     }
   }
 
   return entries;
-}
-
-function findDateInLine(line: string, year: number): string | undefined {
-  const extracted = extractSyllabusDateItemsFromText(line, "inline", year);
-  return extracted[0]?.date;
 }
 
 function routeImportantDateEntry(
@@ -264,29 +280,34 @@ function routeImportantDateEntry(
   eventMap: Map<string, CourseHighlightDate>,
   assignments: AssignmentLike[],
 ) {
+  if (isJunkDateTitle(entry.title)) return;
+  if (!entry.date && !entry.when) return;
   if (entry.sourceType === "moodle_assignment" || isRoutineWork(entry.title)) return;
 
-  if (isImportantAssessment(entry.title)) {
+  const bucket = entry.bucket ?? classifyScheduleTitle(entry.title);
+  if (bucket === "course" || (!bucket && isImportantAssessment(entry.title))) {
     pushAssessment(assessmentMap, {
       id: entry.id,
       title: entry.title,
       date: entry.date ?? findAssignmentDate(entry.title, assignments),
+      when: entry.when,
     });
     return;
   }
 
-  if (!isImportantEventTitle(entry.title)) return;
-
-  pushEvent(eventMap, {
-    id: entry.id,
-    title: entry.title,
-    date: entry.date,
-  });
+  if (bucket === "semester") {
+    pushEvent(eventMap, {
+      id: entry.id,
+      title: entry.title,
+      date: entry.date,
+      when: entry.when,
+    });
+  }
 }
 
 function pushEvent(
   map: Map<string, CourseHighlightDate>,
-  item: { id: string; title: string; date?: string },
+  item: { id: string; title: string; date?: string; when?: string },
 ) {
   const key = titleKey(item.title);
   const existing = map.get(key);
@@ -295,13 +316,14 @@ function pushEvent(
     id: item.id,
     title: normalizeTitle(item.title),
     date: item.date ?? existing?.date,
+    when: item.when ?? existing?.when,
     daysUntil: item.date ? daysUntil(item.date) : existing?.daysUntil,
   });
 }
 
 function pushAssessment(
   map: Map<string, CourseHighlightDate>,
-  item: { id: string; title: string; date?: string },
+  item: { id: string; title: string; date?: string; when?: string },
 ) {
   const key = titleKey(item.title);
   const existing = map.get(key);
@@ -310,6 +332,7 @@ function pushAssessment(
     id: item.id,
     title: normalizeTitle(item.title),
     date: item.date ?? existing?.date,
+    when: item.when ?? existing?.when,
     daysUntil: item.date ? daysUntil(item.date) : existing?.daysUntil,
   });
 }
@@ -342,11 +365,15 @@ export function buildCourseHighlights(
     }
 
     for (const item of sectionItems(portal, "quizzes")) {
-      if (!isImportantAssessment(item.title)) continue;
+      if (isJunkDateTitle(item.title) || !isImportantAssessment(item.title)) continue;
+      const date = item.date ?? findAssignmentDate(item.title, assignments);
+      const when = item.when ?? extractWhenLabel(item.title);
+      if (!date && !when) continue;
       pushAssessment(assessmentMap, {
         id: `quiz-${item.title}`,
-        title: item.title,
-        date: item.date ?? findAssignmentDate(item.title, assignments),
+        title: shortEventTitle(item.title),
+        date,
+        when,
       });
     }
 
@@ -358,23 +385,33 @@ export function buildCourseHighlights(
   }
 
   for (const assignment of assignments) {
-    if (!isImportantAssessment(assignment.title, assignment.kind)) continue;
+    if (isJunkDateTitle(assignment.title) || !isImportantAssessment(assignment.title, assignment.kind)) {
+      continue;
+    }
+    if (!assignment.dueDate) continue;
     pushAssessment(assessmentMap, {
       id: `assignment-${assignment.id}`,
-      title: assignment.title,
-      date: assignment.dueDate ?? undefined,
+      title: shortEventTitle(assignment.title),
+      date: assignment.dueDate,
     });
   }
 
-  const importantAssessments = [...assessmentMap.values()].sort((a, b) => {
-    if (a.date && b.date) return a.date.localeCompare(b.date);
-    if (a.date) return -1;
-    if (b.date) return 1;
-    return a.title.localeCompare(b.title);
-  });
+  const assessmentKeys = new Set([...assessmentMap.keys()]);
+  const importantAssessments = [...assessmentMap.values()]
+    .filter((item) => !isSemesterDateTitle(item.title))
+    .sort((a, b) => {
+      if (a.date && b.date) return a.date.localeCompare(b.date);
+      if (a.date) return -1;
+      if (b.date) return 1;
+      return a.title.localeCompare(b.title);
+    });
 
   const importantEvents = [...eventMap.values()]
-    .filter((item) => !assessmentMap.has(titleKey(item.title)))
+    .filter((item) => Boolean(item.date || item.when))
+    .filter((item) => !assessmentKeys.has(titleKey(item.title)))
+    .filter((item) => classifyScheduleTitle(item.title) !== "course")
+    // Hide dates that have already passed (keep undated "when" labels).
+    .filter((item) => item.daysUntil === undefined || item.daysUntil >= 0)
     .sort((a, b) => {
       if (a.date && b.date) return a.date.localeCompare(b.date);
       if (a.date) return -1;
@@ -415,7 +452,7 @@ export function buildCourseHighlightsFromJson(
 }
 
 export function formatHeadlineDate(iso: string): string {
-  const date = new Date(iso);
+  const date = parseHeadlineDate(iso);
   if (Number.isNaN(date.getTime())) return iso;
   return date.toLocaleDateString(undefined, {
     weekday: "short",
@@ -426,13 +463,27 @@ export function formatHeadlineDate(iso: string): string {
 }
 
 export function formatTermDate(iso: string): string {
-  const date = new Date(iso);
+  const date = parseHeadlineDate(iso);
   if (Number.isNaN(date.getTime())) return iso;
   return date.toLocaleDateString(undefined, {
     month: "long",
     day: "numeric",
     year: "numeric",
   });
+}
+
+export function formatEventTiming(item: CourseHighlightDate): string | null {
+  if (item.when) {
+    const until =
+      item.date && item.daysUntil !== undefined ? ` · ${formatDaysUntilLabel(item.daysUntil)}` : "";
+    return `${item.when}${until}`;
+  }
+  if (item.date) {
+    return `${formatHeadlineDate(item.date)}${
+      item.daysUntil !== undefined ? ` · ${formatDaysUntilLabel(item.daysUntil)}` : ""
+    }`;
+  }
+  return null;
 }
 
 export function formatDaysUntilLabel(days: number): string {

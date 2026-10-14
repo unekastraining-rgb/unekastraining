@@ -143,7 +143,8 @@ export function CalendarSidebar({
         <button
           type="button"
           onClick={onAddEvent}
-          className="flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold text-white shadow-md transition-all duration-200 hover:-translate-y-0.5 hover:opacity-90"
+          data-hub-chrome
+          className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold text-white shadow-md transition-all duration-200 hover:-translate-y-0.5 hover:opacity-90 touch-manipulation"
           style={{
             backgroundColor: appearance.accentColor,
             boxShadow: `0 4px 14px ${appearance.accentColor}40`,

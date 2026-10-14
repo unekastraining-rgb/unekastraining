@@ -1,6 +1,7 @@
 import { LMSProvider } from "@/generated/prisma";
 import { db } from "@/lib/db";
 import { normalizeMoodleBaseUrl } from "@/lib/lms/moodle-url";
+import { openLmsToken, sealLmsToken } from "@/lib/security/lms-token-crypto";
 
 export interface MoodleCredentials {
   baseUrl: string;
@@ -33,6 +34,7 @@ async function persistMoodleCredentials(
   baseUrl: string,
   accessToken: string,
 ): Promise<void> {
+  const sealed = sealLmsToken(accessToken);
   const existing = await db.lMSConnection.findFirst({
     where: { userId, provider: LMSProvider.MOODLE },
   });
@@ -42,7 +44,7 @@ async function persistMoodleCredentials(
       where: { id: existing.id },
       data: {
         baseUrl,
-        accessToken,
+        accessToken: sealed,
         status: "connected",
         displayName: baseUrl,
       },
@@ -55,7 +57,7 @@ async function persistMoodleCredentials(
       userId,
       provider: LMSProvider.MOODLE,
       baseUrl,
-      accessToken,
+      accessToken: sealed,
       status: "connected",
       displayName: baseUrl,
     },
@@ -73,13 +75,11 @@ export async function resolveMoodleCredentials(
     select: { baseUrl: true, accessToken: true },
   });
 
-  if (
-    connection?.baseUrl &&
-    isValidMoodleToken(connection.accessToken)
-  ) {
+  const opened = openLmsToken(connection?.accessToken);
+  if (connection?.baseUrl && isValidMoodleToken(opened)) {
     return {
       baseUrl: normalizeMoodleBaseUrl(connection.baseUrl),
-      accessToken: connection.accessToken!.trim(),
+      accessToken: opened!.trim(),
       source: "database",
     };
   }

@@ -10,18 +10,22 @@ export function PaletteCard({
   onSelect,
   onFavorite,
   onDuplicate,
+  touchFriendly = false,
 }: {
   palette: { id: string; name: string; colors: string[] };
   favorite?: boolean;
   onSelect?: (colors: string[]) => void;
   onFavorite?: () => void;
   onDuplicate?: () => void;
+  touchFriendly?: boolean;
 }) {
+  const touchChip = touchFriendly ? " min-h-11 touch-manipulation" : "";
+
   return (
     <button
       type="button"
       onClick={() => onSelect?.(palette.colors)}
-      className="group w-full overflow-hidden rounded-2xl border border-stone-200/80 bg-white text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+      className={`group w-full overflow-hidden rounded-2xl border border-stone-200/80 bg-white text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md${touchChip}`}
     >
       <div className="flex">
         <div className="flex w-14 shrink-0 flex-col gap-1 border-r border-stone-100 p-2">
@@ -82,12 +86,14 @@ export function PaletteCardGrid({
   onSelectPalette,
   onFavorite,
   onDuplicate,
+  touchFriendly = false,
 }: {
   palettes: Array<{ id: string; name: string; colors: string[] }>;
   favoriteIds?: string[];
   onSelectPalette?: (colors: string[]) => void;
   onFavorite?: (id: string) => void;
   onDuplicate?: (palette: ColorPalette) => void;
+  touchFriendly?: boolean;
 }) {
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -98,6 +104,7 @@ export function PaletteCardGrid({
           favorite={favoriteIds.includes(palette.id)}
           onSelect={onSelectPalette}
           onFavorite={onFavorite ? () => onFavorite(palette.id) : undefined}
+          touchFriendly={touchFriendly}
         />
       ))}
     </div>

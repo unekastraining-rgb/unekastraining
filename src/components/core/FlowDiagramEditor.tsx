@@ -11,9 +11,11 @@ export { emptyFlow };
 export function FlowDiagramEditor({
   data,
   onChange,
+  bare = false,
 }: {
   data: FlowData;
   onChange: (data: FlowData) => void;
+  bare?: boolean;
 }) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -87,23 +89,43 @@ export function FlowDiagramEditor({
   const onPointerUp = () => setDraggingId(null);
 
   return (
-    <div className="flex h-full min-h-[24rem] flex-col">
-      <div className="flex flex-wrap gap-2 border-b border-orange-100 bg-orange-50/40 p-2">
+    <div
+      className={
+        bare
+          ? "flex h-full min-h-0 flex-col bg-transparent"
+          : "flex h-full min-h-[24rem] flex-col"
+      }
+    >
+      <div
+        className={
+          bare
+            ? "flex flex-wrap items-center gap-2 px-0.5 py-1"
+            : "flex flex-wrap gap-2 border-b border-orange-100 bg-orange-50/40 p-2"
+        }
+      >
         <button
           type="button"
           onClick={addNode}
-          className="inline-flex items-center gap-1 rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white"
+          className={
+            bare
+              ? "inline-flex items-center gap-1 text-[10px] font-semibold text-stone-400 hover:text-teal-700"
+              : "inline-flex items-center gap-1 rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white"
+          }
         >
           <Plus className="h-3.5 w-3.5" /> Add step
         </button>
-        <p className="self-center text-xs text-stone-500">
+        <p className={bare ? "self-center text-[10px] text-stone-400" : "self-center text-xs text-stone-500"}>
           {linkFrom ? "Click another step to connect" : "Click a step twice to draw arrows"}
         </p>
       </div>
 
       <div
         ref={canvasRef}
-        className="relative min-h-[22rem] flex-1 overflow-auto bg-[radial-gradient(circle_at_1px_1px,#f5d0a8_1px,transparent_0)] bg-[length:20px_20px]"
+        className={
+          bare
+            ? "relative min-h-0 flex-1 overflow-hidden bg-transparent"
+            : "relative min-h-[22rem] flex-1 overflow-auto bg-[radial-gradient(circle_at_1px_1px,#f5d0a8_1px,transparent_0)] bg-[length:20px_20px]"
+        }
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
       >

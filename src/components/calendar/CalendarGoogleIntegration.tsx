@@ -49,6 +49,7 @@ export function CalendarGoogleIntegration({
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async data load on mount or dependency change
     void loadStatus();
   }, [loadStatus]);
 
@@ -61,6 +62,7 @@ export function CalendarGoogleIntegration({
     if (googleConnected === "1") {
       const imported = params.get("imported") ?? "0";
       const updated = params.get("updated") ?? "0";
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync UI state to props or external subscription
       setMessage(
         `Google Calendar connected. Imported ${imported} events, updated ${updated}.`,
       );

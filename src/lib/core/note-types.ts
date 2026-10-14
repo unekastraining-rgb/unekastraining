@@ -14,6 +14,8 @@ export interface SketchPoint {
   x: number;
   y: number;
   pressure?: number;
+  /** Pointer timestamp (ms) for velocity taper — GoodNotes-adjacent ink feel. */
+  t?: number;
 }
 
 export interface SketchStroke {
@@ -23,6 +25,17 @@ export interface SketchStroke {
   points: SketchPoint[];
   tool?: "pen" | "highlighter" | "eraser";
   opacity?: number;
+  /** Snapshot of pen feel at stroke time (pressure curve). */
+  feel?: {
+    pressureSensitivity?: number;
+    tipFlatness?: number;
+    tipSharpness?: number;
+    strokeType?: "solid" | "dashed" | "dotted";
+    reduceLatency?: boolean;
+    medium?: "ink" | "chalk" | "crayon" | "colorPencil" | "marker";
+    /** Decorative ink fill drawn with the stroke color. */
+    fillPattern?: "solid" | "stripes" | "bubbles" | "dots" | "grid";
+  };
 }
 
 export interface CanvasViewport {
@@ -75,12 +88,33 @@ export interface NotebookChromeState {
   customCoverColor?: string | null;
   /** When false, page has no cover band or spine. */
   showCover?: boolean;
+  /** Imported cover artwork (media asset id). Wins over coverId / customCoverColor. */
+  customCoverAssetId?: string | null;
   pageTemplateId?: PageTemplateId;
   /** Imported PNG/JPG/PDF background asset id */
   customBackgroundAssetId?: string | null;
+  /**
+   * How added pages read: "scroll" stacks sheets vertically (continuous),
+   * "book" lays facing sheets side by side. Set by the page-add direction.
+   */
+  pageLayoutMode?: "scroll" | "book";
+  /** Page orientation preference (create + edit). Full-bleed desk still fills the screen. */
+  pageOrientation?: "portrait" | "landscape";
   penPresetId?: PenPresetId;
   /** Page fill behind template */
   pageBackgroundColor?: string | null;
+  /** Ruling / grid line color (ruled, graph, staff, etc.) */
+  rulingLineColor?: string | null;
+  /** Line or grid spacing in px (college vs wide ruled feel) */
+  rulingSpacingPx?: number | null;
+  /** Show/hide ink layers on the page */
+  layerVisibility?: {
+    pen?: boolean;
+    highlighter?: boolean;
+    shapes?: boolean;
+    stickies?: boolean;
+    textBoxes?: boolean;
+  };
   /** Notebook edge / margin accent */
   edgeColor?: string | null;
   /** Visual scheme for page chrome */
@@ -95,7 +129,10 @@ export interface PageTextBox {
   y: number;
   width: number;
   height: number;
+  /** Plain-text fallback / search index */
   text: string;
+  /** Rich HTML (bold, underline, colors, highlights). When set, preferred for display. */
+  html?: string;
   color?: string;
   backgroundColor?: string;
   rotation?: number;
@@ -114,6 +151,8 @@ export type DecorationKind =
   | "triangle"
   | "arrow"
   | "line"
+  | "vline"
+  | "border_frame"
   | "dot"
   | "shape_rect"
   | "hexagon"
@@ -131,6 +170,8 @@ export interface PageDecoration {
   h: number;
   color: string;
   text?: string;
+  /** Rich HTML for sticky / label text */
+  html?: string;
   number?: number;
   rotation?: number;
   locked?: boolean;
@@ -175,6 +216,12 @@ export interface NotebookPageRecord {
   pageNumber: number;
   label?: string;
   data: Record<string, unknown>;
+  /**
+   * FreeNotes-style desk placement. Missing values are filled on read
+   * (vertical stack: page i → row i-1, col 0).
+   */
+  gridRow?: number;
+  gridCol?: number;
 }
 
 export interface NotebookPagesContainer {
@@ -186,6 +233,9 @@ export interface CornellContent {
   notes: string;
   cues: string;
   summary: string;
+  notesHtml?: string;
+  cuesHtml?: string;
+  summaryHtml?: string;
 }
 
 export interface MindMapNode {
@@ -275,11 +325,70 @@ export interface NoteDocumentMetadata {
   activeFormat?: CoreFormatId;
   recommendedFormats?: FormatRecommendation[];
   appliedFormats?: CoreFormatId[];
+  /** Study-guide template applied by With-AI import (not a packed format list). */
+  studyTemplateId?: string;
   materialSummary?: string;
+  materialSource?: {
+    materialId: string;
+    title: string;
+    type?: string;
+  };
+  /**
+   * 2P-27 — Material → learning prepare state (additive).
+   * Source processing only — never evidence or mastery.
+   */
+  materialLearning?: {
+    version: 1;
+    state: "UPLOADING" | "PROCESSING" | "READY" | "PARTIAL" | "FAILED";
+    preparedAt: string;
+    nonAi: boolean;
+    truncated: boolean;
+    materialId: string;
+  };
+  /** Persisted With-AI study-worthy extract for Ask / quizzes / flashcards. */
+  chapterStudyExtract?: import("@/lib/core/chapter-study-extract").ChapterStudyExtract;
+  /** Snapshot of original pasted/imported source; study pages must not replace this. */
+  notebookSourceText?: string;
+  /**
+   * Last Selection → Lucky target (scoped text / topic) so Core remembers
+   * what was quizzed from this notebook.
+   */
+  luckyOutcomeTarget?: {
+    kind?: "quiz" | "pack";
+    quizId?: string;
+    topic?: string;
+    sourcePreview?: string;
+    createdAt?: string;
+  };
+  /**
+   * Last successful ink OCR snapshot so Hub search / Study packs can find
+   * handwriting without re-running vision every time (GoodNotes-adjacent).
+   */
+  lastInkOcr?: {
+    text: string;
+    updatedAt: string;
+  };
+  sourcePageId?: string;
   guideDismissed?: boolean;
   aiBlocks?: Array<{ id: string; label: string; content: string }>;
   compositeSections?: CompositeSection[];
+  /** Xiaomi Notes-style quick notes, reminders, and starred concepts on this notebook. */
+  notebookDesk?: import("@/lib/core/notebook-desk").NotebookDeskState;
+  /**
+   * Phase 2E-1 — optional CORE → Knowledge Model grounding (additive).
+   * Ignored by CORE features that do not opt in. Merge-safe.
+   */
+  learningKnowledge?: import("@/lib/learning/knowledge/core-bridge-types").LearningKnowledgeMeta;
   notebookPages?: NotebookPagesContainer;
+  /**
+   * 2P-50 — Multi-file project container (Note-backed refs).
+   * Present only on the project container note. File notes remain ordinary Notes.
+   */
+  multiFileProject?: import("@/lib/learning/artifact-persistence").MultiFileProjectMeta;
+  /** When set, this note is a file inside a multi-file project container. */
+  projectFileOf?: string;
+  /** Soft artifact type hint for project files / activity continuity. */
+  artifactType?: import("@/lib/learning/artifact-persistence").ArtifactType;
   fontSize?: number;
   fontFamily?: string;
   coreToolbar?: import("@/lib/core/core-toolbar-types").CoreToolbarState;
@@ -374,6 +483,8 @@ export function emptyOutlineNodes(): { nodes: OutlineNode[] } {
 export interface NoteDocument {
   tool: NoteTool;
   typed: string;
+  /** Rich HTML for freeform page typing (preferred over plain typed when present). */
+  typedHtml?: string;
   strokes: SketchStroke[];
   cornell?: CornellContent;
   outline?: string[];
@@ -430,10 +541,11 @@ export function emptyCanvas(): InfiniteCanvasData {
   };
 }
 
-export function emptyDocument(tool: NoteTool = "type"): NoteDocument {
+export function emptyDocument(tool: NoteTool = "sketch"): NoteDocument {
   return {
     tool,
     typed: "",
+    typedHtml: "",
     strokes: [],
     outline: [""],
     outlineNodes: emptyOutlineNodes().nodes,
@@ -453,8 +565,8 @@ export function emptyDocument(tool: NoteTool = "type"): NoteDocument {
     audioClips: [],
     notebook: {
       coverId: "classic_orange",
-      customCoverColor: "#ea580c",
-      showCover: true,
+      customCoverColor: null,
+      showCover: false,
       pageTemplateId: "blank",
       penPresetId: "ballpoint",
     },

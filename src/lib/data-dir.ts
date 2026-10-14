@@ -8,5 +8,5 @@ export function getDataDir(): string {
 }
 
 export function uploadsDir(...segments: string[]): string {
-  return path.join(getDataDir(), "uploads", ...segments);
+  return path.join(/* turbopackIgnore: true */ getDataDir(), "uploads", ...segments);
 }

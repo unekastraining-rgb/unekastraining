@@ -48,6 +48,7 @@ export function GoogleCalendarPicker({
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async data load on mount or dependency change
     if (open) void loadCalendars();
   }, [open, loadCalendars]);
 
@@ -80,7 +81,7 @@ export function GoogleCalendarPicker({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-stone-900/40 p-4 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[600] flex items-center justify-center bg-stone-900/40 p-4 backdrop-blur-sm">
       <div className="max-h-[85vh] w-full max-w-lg overflow-hidden rounded-3xl border border-orange-100 bg-white shadow-2xl">
         <div className="border-b border-orange-100 px-6 py-4">
           <h2 className="text-lg font-bold text-stone-900">Choose Google calendars</h2>

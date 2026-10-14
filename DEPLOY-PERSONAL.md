@@ -146,3 +146,13 @@ This app uses **SQLite + local PDF files**. Serverless hosts reset disk on each 
 | OAuth redirect mismatch | `NEXT_PUBLIC_APP_URL` must exactly match browser URL (including `https://`) |
 | AI not working | Check `GEMINI_API_KEY` with `fly secrets list` |
 | Uploads missing after redeploy | Ensure volume is mounted (`fly volumes list`) |
+
+---
+
+## Backup & recovery (private/beta)
+
+Full runbook: [`src/lib/learning/PRIVATE_BETA_DEPLOYMENT.md`](./src/lib/learning/PRIVATE_BETA_DEPLOYMENT.md).
+
+**Before risky deploys / schema changes:** copy `/data/dev.db` off the machine (e.g. `fly sftp get`).  
+**Never** use `--accept-data-loss` or database reset on production data.  
+**Rotating `SESSION_SECRET`:** re-connect LMS / Google Calendar (sealed tokens are keyed from the secret).

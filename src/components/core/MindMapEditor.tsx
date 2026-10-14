@@ -12,9 +12,11 @@ export { emptyMindMap };
 export function MindMapEditor({
   data,
   onChange,
+  bare = false,
 }: {
   data: MindMapData;
   onChange: (data: MindMapData) => void;
+  bare?: boolean;
 }) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -101,16 +103,32 @@ export function MindMapEditor({
   };
 
   return (
-    <div className="flex h-full min-h-[420px] flex-col rounded-2xl border border-orange-100 bg-white">
-      <div className="flex flex-wrap items-center gap-2 border-b border-orange-50 px-3 py-2">
+    <div
+      className={
+        bare
+          ? "flex h-full min-h-0 flex-col bg-transparent"
+          : "flex h-full min-h-[420px] flex-col rounded-2xl border border-orange-100 bg-white"
+      }
+    >
+      <div
+        className={
+          bare
+            ? "flex flex-wrap items-center gap-2 px-0.5 py-1"
+            : "flex flex-wrap items-center gap-2 border-b border-orange-50 px-3 py-2"
+        }
+      >
         <button
           type="button"
           onClick={addNode}
-          className="inline-flex items-center gap-1 rounded-lg bg-orange-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-orange-600"
+          className={
+            bare
+              ? "inline-flex items-center gap-1 text-[10px] font-semibold text-stone-400 hover:text-teal-700"
+              : "inline-flex items-center gap-1 rounded-lg bg-orange-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-orange-600"
+          }
         >
           <Plus className="h-3.5 w-3.5" /> Add node
         </button>
-        <p className="text-xs text-stone-500">
+        <p className={bare ? "text-[10px] text-stone-400" : "text-xs text-stone-500"}>
           {linkFrom
             ? "Click another node to connect"
             : "Double-click a node to start a link · drag to move"}
@@ -119,7 +137,11 @@ export function MindMapEditor({
 
       <div
         ref={canvasRef}
-        className="relative flex-1 overflow-hidden bg-[radial-gradient(circle,#fed7aa33_1px,transparent_1px)] bg-[length:20px_20px]"
+        className={
+          bare
+            ? "relative min-h-0 flex-1 overflow-hidden bg-transparent"
+            : "relative flex-1 overflow-hidden bg-[radial-gradient(circle,#fed7aa33_1px,transparent_1px)] bg-[length:20px_20px]"
+        }
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerLeave={onPointerUp}

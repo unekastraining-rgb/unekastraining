@@ -24,7 +24,7 @@ export const LMS_PROVIDERS: LMSProviderInfo[] = [
   {
     id: "CANVAS",
     name: "Canvas",
-    description: "Import courses, assignments, and due dates from Canvas LMS.",
+    description: "Import courses, syllabi/modules, assignments, and due dates from Canvas LMS.",
     connectType: "oauth",
     docsUrl: "https://canvas.instructure.com/doc/api/",
   },

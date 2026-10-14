@@ -33,6 +33,7 @@ export function ScheduleProposalsPanel({
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async data load on mount or dependency change
     void load();
   }, [load]);
 

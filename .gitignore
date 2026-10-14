@@ -49,6 +49,19 @@ dev.db
 dev.db-journal
 prisma/dev.db
 prisma/dev.db-journal
+e2e.db
+e2e.db-journal
+e2e.db-wal
+e2e.db-shm
+e2e/data.db
+e2e/data.db-journal
+e2e/data.db-wal
+e2e/data.db-shm
+e2e/.seed.json
+playwright-report/
+test-results/
+blob-report/
+e2e-last-run.log
 
 # uploaded syllabus files
 /uploads/

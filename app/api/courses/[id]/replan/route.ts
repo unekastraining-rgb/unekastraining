@@ -10,6 +10,7 @@ import {
 } from "@/lib/grade-school/progress";
 import { SYLLABUS_PLAN_MATERIAL_TITLE } from "@/lib/syllabus/enrich-course-from-syllabus";
 import { replanCurriculum } from "@/lib/syllabus/replan-curriculum";
+import { getUserAppSettings } from "@/lib/settings/app-settings";
 
 export async function POST(
   request: Request,
@@ -17,6 +18,7 @@ export async function POST(
 ) {
   try {
     const { user } = await requireGradeSchoolMode();
+    const appSettings = await getUserAppSettings(user.id);
     const { id: courseId } = await context.params;
     const body = await request.json();
     const parentNotes =
@@ -69,6 +71,7 @@ export async function POST(
       curriculum,
       completedSteps,
       parentNotes: parentNotes || null,
+      includeOpenAIPro: appSettings.aiUseOpenAIPro,
     });
 
     if (material) {

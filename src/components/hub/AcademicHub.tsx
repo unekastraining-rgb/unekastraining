@@ -1,11 +1,16 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { CustomizationProvider } from "@/components/customization/CustomizationProvider";
+import { useCompactHubNav } from "@/hooks/useCompactHubNav";
+import { triggerLmsBackgroundSync } from "@/lib/lms/background-sync";
+import { dispatchLmsSynced } from "@/lib/lms/sync-events";
 import { hubTabPath, parseHubDateParam, parseHubTab } from "@/lib/hub/tabs";
 import { buildCalendarHref } from "@/lib/calendar/links";
+import { resolveUrlCourseId } from "@/lib/study/resolve-url-course-id";
 
 import { AssignmentsTab } from "./AssignmentsTab";
 import { BottomNav } from "./BottomNav";
@@ -16,79 +21,58 @@ import { HubDashboardTab } from "./HubDashboardTab";
 import { HubTopBar } from "./HubTopBar";
 import { LockerTab } from "./LockerTab";
 import { SettingsPanel } from "./settings/SettingsPanel";
-import { SidebarNav } from "./SidebarNav";
 import type { HubData, HubTab } from "./types";
 import type { PlanningNavActive } from "./planning-nav-types";
 import { DEFAULT_APP_SETTINGS } from "@/lib/settings/app-settings";
 
+const SidebarNav = dynamic(
+  () => import("./SidebarNav").then((mod) => ({ default: mod.SidebarNav })),
+  {
+    ssr: false,
+    loading: () => (
+      <aside className="hidden w-60 shrink-0 xl:block xl:w-72" aria-hidden />
+    ),
+  },
+);
+
 export function AcademicHub({
   data,
+  initialTab = "hub",
 }: {
   data: HubData;
+  /** Server-parsed `?tab=` so Settings/Pro opens without waiting on client searchParams. */
+  initialTab?: HubTab;
 }) {
-  const [activeTab, setActiveTab] = useState<HubTab>("hub");
-  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [activeTab, setActiveTab] = useState<HubTab>(initialTab);
 
   return (
     <CustomizationProvider>
-      <Suspense
-        fallback={
-          <div className="flex min-h-screen items-center justify-center text-sm text-stone-500">
-            Loading hub…
-          </div>
-        }
-      >
-        <AcademicHubContent
-          data={data}
-          activeTab={activeTab}
-          setActiveTab={setActiveTab}
-          selectedDate={selectedDate}
-          setSelectedDate={setSelectedDate}
-        />
+      <AcademicHubShell
+        data={data}
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+      />
+      {/* URL sync only — must not block the whole hub behind Suspense. */}
+      <Suspense fallback={null}>
+        <HubUrlSync setActiveTab={setActiveTab} />
       </Suspense>
     </CustomizationProvider>
   );
 }
 
-function AcademicHubContent({
-  data,
-  activeTab,
+function HubUrlSync({
   setActiveTab,
-  selectedDate,
-  setSelectedDate,
 }: {
-  data: HubData;
-  activeTab: HubTab;
   setActiveTab: (tab: HubTab) => void;
-  selectedDate: Date;
-  setSelectedDate: (date: Date) => void;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const assignmentsView = searchParams.get("view") === "assignments";
-  const [desktopNotifications, setDesktopNotifications] = useState(
-    DEFAULT_APP_SETTINGS.desktopNotifications,
-  );
-  const [chatPrompt, setChatPrompt] = useState<string | null>(null);
-  const [chatCourseId, setChatCourseId] = useState<string | null>(null);
-  const [planningActive, setPlanningActive] = useState<PlanningNavActive>("hub");
-
-  const handleTabChange = useCallback(
-    (tab: HubTab) => {
-      setActiveTab(tab);
-      router.replace(hubTabPath(tab), { scroll: false });
-    },
-    [router, setActiveTab],
-  );
 
   useEffect(() => {
     const tab = parseHubTab(searchParams.get("tab"));
     const focus = searchParams.get("focus");
     const date = parseHubDateParam(searchParams.get("date"));
-
-    if (date) {
-      setSelectedDate(date);
-    }
 
     if (date && !assignmentsView && !focus) {
       router.replace(buildCalendarHref({ date: searchParams.get("date") ?? undefined }));
@@ -100,25 +84,72 @@ function AcademicHubContent({
         setActiveTab("hub");
       } else if (tab !== "chat" && tab !== "settings" && tab !== "classes" && tab !== "locker") {
         setActiveTab("hub");
+      } else {
+        setActiveTab(tab);
       }
     } else if (date) {
-      // Date deep links belong on the calendar page
       setActiveTab("hub");
     } else {
       setActiveTab(tab);
     }
+  }, [assignmentsView, router, searchParams, setActiveTab]);
 
-    setPlanningActive("hub");
+  return null;
+}
 
-    const prompt = searchParams.get("prompt");
-    const chatCourse = searchParams.get("courseId");
-    if (tab === "chat" && prompt) {
-      setChatPrompt(prompt);
+function AcademicHubShell({
+  data,
+  activeTab,
+  setActiveTab,
+}: {
+  data: HubData;
+  activeTab: HubTab;
+  setActiveTab: (tab: HubTab) => void;
+}) {
+  const router = useRouter();
+  const compactNav = useCompactHubNav();
+  const [desktopNotifications, setDesktopNotifications] = useState(
+    DEFAULT_APP_SETTINGS.desktopNotifications,
+  );
+  const [chatPrompt, setChatPrompt] = useState<string | null>(null);
+  const [chatCourseId, setChatCourseId] = useState<string | null>(null);
+  const [chatTopic, setChatTopic] = useState<string | null>(null);
+  const courseIds = data.courses.map((course) => course.id);
+  const [planningActive] = useState<PlanningNavActive>("hub");
+  const [assignmentsView, setAssignmentsView] = useState(false);
+  const lmsRefreshDone = useRef(false);
+
+  // Lightweight URL read for assignments view without suspending the shell.
+  useEffect(() => {
+    function syncFromLocation() {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        setAssignmentsView(params.get("view") === "assignments");
+        const prompt = params.get("prompt");
+        const chatCourse = params.get("courseId");
+        const topic = params.get("topic");
+        const tab = parseHubTab(params.get("tab"));
+        if (tab === "chat" && prompt) setChatPrompt(prompt);
+        if (tab === "chat" && chatCourse) {
+          setChatCourseId(resolveUrlCourseId(chatCourse, courseIds));
+        }
+        if (tab === "chat" && topic?.trim()) setChatTopic(topic.trim());
+      } catch {
+        // ignore
+      }
     }
-    if (tab === "chat" && chatCourse) {
-      setChatCourseId(chatCourse);
-    }
-  }, [assignmentsView, router, searchParams, setActiveTab, setSelectedDate]);
+    syncFromLocation();
+    window.addEventListener("popstate", syncFromLocation);
+    return () => window.removeEventListener("popstate", syncFromLocation);
+  }, [activeTab, courseIds]);
+
+  const handleTabChange = useCallback(
+    (tab: HubTab) => {
+      setActiveTab(tab);
+      router.replace(hubTabPath(tab), { scroll: false });
+    },
+    [router, setActiveTab],
+  );
 
   useEffect(() => {
     void fetch("/api/preferences")
@@ -129,11 +160,20 @@ function AcademicHubContent({
         }
       })
       .catch(() => {});
-  }, []);
+
+    if (!lmsRefreshDone.current) {
+      void triggerLmsBackgroundSync().then((synced) => {
+        if (!synced || lmsRefreshDone.current) return;
+        lmsRefreshDone.current = true;
+        dispatchLmsSynced();
+        if (!compactNav) router.refresh();
+      });
+    }
+  }, [compactNav, router]);
 
   return (
     <div
-      className="relative min-h-screen overflow-x-clip pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-8"
+      className="relative min-h-screen overflow-x-clip pb-[calc(5.5rem+env(safe-area-inset-bottom))] xl:pb-8"
       style={{
         background: "var(--sh-gradient, var(--sh-background, #fff8f1))",
         color: "var(--sh-text-heading, #1c1917)",
@@ -155,6 +195,8 @@ function AcademicHubContent({
       <HubTopBar
         onOpenSettings={() => handleTabChange("settings")}
         planningActive={planningActive}
+        activeTab={activeTab}
+        onTabChange={handleTabChange}
       />
 
       <div className="relative hub-shell py-6 lg:py-8">
@@ -179,12 +221,15 @@ function AcademicHubContent({
                 jumpBackIn={data.jumpBackIn}
                 updates={data.updates}
                 assignments={data.assignments}
+                courses={data.courses}
                 todayCalendarEvents={data.todayCalendarEvents}
+                todayKey={data.todayKey}
                 stats={data.stats}
                 attention={data.attention}
                 telemetry={data.telemetry}
                 gradeSchoolPlans={data.gradeSchoolPlans}
                 courseCount={data.courses.length}
+                weeklySchedule={data.weeklySchedule}
               />
             ) : null}
 
@@ -234,6 +279,7 @@ function AcademicHubContent({
                   variant="panel"
                   courses={data.courses}
                   initialCourseId={chatCourseId}
+                  initialTopic={chatTopic}
                   pendingPrompt={chatPrompt}
                   onPendingPromptConsumed={() => setChatPrompt(null)}
                 />

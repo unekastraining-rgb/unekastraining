@@ -5,7 +5,7 @@ import { parseCurriculumFromMaterial } from "@/lib/grade-school/learning-plan";
 import { parseStudyTopicFromMaterial } from "@/lib/study-topic/parse";
 
 export interface MaterialWithCourse extends CourseMaterial {
-  course: { id: string; title: string };
+  course: { id: string; title: string; code?: string | null };
 }
 
 export interface MaterialWorkbookResult {
@@ -55,7 +55,7 @@ export async function loadMaterialForUser(
 ): Promise<MaterialWithCourse | null> {
   return db.courseMaterial.findFirst({
     where: { id: materialId, course: { userId } },
-    include: { course: { select: { id: true, title: true } } },
+    include: { course: { select: { id: true, title: true, code: true } } },
   });
 }
 

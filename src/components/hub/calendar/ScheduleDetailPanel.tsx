@@ -94,7 +94,7 @@ export function ScheduleDetailPanel({
             <div className="mt-6 flex flex-col gap-2">
               <Link
                 href="/courses"
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-soft0 px-4 py-2.5 text-sm font-semibold text-white"
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[var(--sh-primary,#ea580c)] px-4 py-2.5 text-sm font-semibold text-white touch-manipulation hover:brightness-95"
               >
                 <Upload className="h-4 w-4" />
                 Scan syllabus
@@ -125,7 +125,7 @@ export function ScheduleDetailPanel({
                       : ""
                   } ${
                     isSelected
-                      ? "border-brand bg-brand-soft ring-2 ring-[color-mix(in_srgb,var(--sh-primary)_18%,transparent)]"
+                      ? "hub-schedule-selected border-brand bg-brand-soft"
                       : "border-brand bg-white hover:border-brand hover:bg-brand-soft/50"
                   } ${isComplete ? "opacity-80" : ""}`}
                 >

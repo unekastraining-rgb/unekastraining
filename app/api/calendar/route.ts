@@ -6,7 +6,6 @@ import {
   type CalendarEventType,
   type CalendarPriority,
 } from "@/generated/prisma";
-import { isAssignmentCompleted } from "@/lib/academic";
 import {
   buildUnifiedCalendarItems,
   calendarEventToItem,
@@ -138,7 +137,7 @@ export async function GET(request: Request) {
           OR: [{ endAt: { gte: rangeStart } }, { endAt: null }],
         },
         include: {
-          course: { select: { id: true, title: true, color: true } },
+          course: { select: { id: true, title: true, code: true, color: true } },
         },
         orderBy: { startAt: "asc" },
       }),
@@ -151,19 +150,19 @@ export async function GET(request: Request) {
           ],
         },
         include: {
-          course: { select: { id: true, title: true, color: true } },
+          course: { select: { id: true, title: true, code: true, color: true } },
           calendarEvent: { select: { id: true } },
         },
       }),
       db.classMeeting.findMany({
         where: { course: { userId: user.id } },
         include: {
-          course: { select: { id: true, title: true, color: true } },
+          course: { select: { id: true, title: true, code: true, color: true } },
         },
       }),
       db.course.findMany({
         where: { userId: user.id },
-        select: { id: true, title: true, color: true },
+        select: { id: true, title: true, code: true, color: true },
         orderBy: { title: "asc" },
       }),
     ]);
@@ -385,7 +384,7 @@ export async function PATCH(request: Request) {
       const existing = await db.calendarEvent.findFirst({
         where: { id: resolvedSourceId, userId: user.id },
         include: {
-          course: { select: { id: true, title: true, color: true } },
+          course: { select: { id: true, title: true, code: true, color: true } },
           assignment: true,
         },
       });
@@ -446,7 +445,7 @@ export async function PATCH(request: Request) {
         where: { id: resolvedSourceId },
         data: mutation.masterData,
         include: {
-          course: { select: { id: true, title: true, color: true } },
+          course: { select: { id: true, title: true, code: true, color: true } },
         },
       });
 

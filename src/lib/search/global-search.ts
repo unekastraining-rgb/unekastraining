@@ -1,9 +1,14 @@
 import { db } from "@/lib/db";
-import { buildSixHrefForTopic } from "@/lib/csl/six-recommendations";
 import { coursePath } from "@/lib/courses";
+import { readableCourseCode, readableCourseName, readableCourseTitle } from "@/lib/courses/display-name";
 import { hubAssignmentFocusHref, hubCalendarHref } from "@/lib/hub/tabs";
+import { buildSixHrefForTopic } from "@/lib/csl/six-recommendations";
 
 import { formatActivityLabel, sessionHref } from "./search-meta";
+import {
+  extractInkOcrFromNoteJson,
+  noteMatchesSearchQuery,
+} from "./note-ink-search";
 
 export type SearchResultType =
   | "course"
@@ -22,10 +27,18 @@ export interface GlobalSearchResult {
   title: string;
   subtitle: string;
   href: string;
+  /** When set, search UI can offer Core → Six → Lucky shortcuts for this hit. */
+  loopCourseId?: string;
+  loopTopic?: string;
 }
 
 function matches(haystack: string | null | undefined, query: string) {
   return (haystack ?? "").toLowerCase().includes(query);
+}
+
+function courseLabel(course?: { title: string; code?: string | null } | null) {
+  if (!course) return null;
+  return readableCourseTitle(course.title, course.code);
 }
 
 export async function searchGlobal(
@@ -45,37 +58,37 @@ export async function searchGlobal(
     }),
     db.assignment.findMany({
       where: { course: { userId } },
-      include: { course: { select: { title: true } } },
+      include: { course: { select: { title: true, code: true } } },
       orderBy: { dueDate: "asc" },
       take: 60,
     }),
     db.note.findMany({
       where: { userId },
-      include: { course: { select: { id: true, title: true } } },
+      include: { course: { select: { id: true, title: true, code: true } } },
       orderBy: { updatedAt: "desc" },
       take: 60,
     }),
     db.flashcard.findMany({
       where: { userId },
-      include: { topic: { include: { course: { select: { title: true } } } } },
+      include: { topic: { include: { course: { select: { title: true, code: true } } } } },
       take: 80,
     }),
     db.quiz.findMany({
       where: { userId },
-      include: { course: { select: { id: true, title: true } } },
+      include: { course: { select: { id: true, title: true, code: true } } },
       orderBy: { updatedAt: "desc" },
       take: 40,
     }),
     db.courseMaterial.findMany({
       where: { course: { userId } },
-      include: { course: { select: { id: true, title: true } } },
+      include: { course: { select: { id: true, title: true, code: true } } },
       orderBy: { updatedAt: "desc" },
       take: 60,
     }),
     db.studySession.findMany({
       where: { userId },
       include: {
-        course: { select: { title: true } },
+        course: { select: { title: true, code: true } },
         topic: { select: { name: true } },
       },
       orderBy: { startedAt: "desc" },
@@ -83,14 +96,14 @@ export async function searchGlobal(
     }),
     db.calendarEvent.findMany({
       where: { userId },
-      include: { course: { select: { title: true } } },
+      include: { course: { select: { title: true, code: true } } },
       orderBy: { startAt: "desc" },
       take: 80,
     }),
     db.topic.findMany({
       where: { course: { userId } },
       include: {
-        course: { select: { id: true, title: true } },
+        course: { select: { id: true, title: true, code: true } },
         masteries: {
           where: { userId },
           take: 1,
@@ -104,17 +117,22 @@ export async function searchGlobal(
   const results: GlobalSearchResult[] = [];
 
   for (const course of courses) {
+    const displayTitle = readableCourseName(course);
+    const displayCode = readableCourseCode(course);
     if (
       matches(course.title, query) ||
       matches(course.code, query) ||
+      matches(displayTitle, query) ||
+      matches(displayCode, query) ||
       matches(course.instructor, query)
     ) {
       results.push({
         id: course.id,
         type: "course",
-        title: course.title,
-        subtitle: course.code ?? "Course",
+        title: displayTitle,
+        subtitle: displayCode ?? "Course",
         href: coursePath(course.id),
+        loopCourseId: course.id,
       });
     }
   }
@@ -123,29 +141,33 @@ export async function searchGlobal(
     if (
       matches(assignment.title, query) ||
       matches(assignment.description, query) ||
-      matches(assignment.course.title, query)
+      matches(assignment.course.title, query) ||
+      matches(courseLabel(assignment.course), query)
     ) {
       results.push({
         id: assignment.id,
         type: "assignment",
         title: assignment.title,
-        subtitle: assignment.course.title,
+        subtitle: courseLabel(assignment.course) ?? assignment.course.title,
         href: hubAssignmentFocusHref(assignment.id),
       });
     }
   }
 
   for (const note of notes) {
-    const body = `${note.content} ${note.contentJson ?? ""}`;
-    if (matches(note.title, query) || matches(body, query)) {
+    const { matches: noteHit, fromHandwriting } = noteMatchesSearchQuery(note, query);
+    if (noteHit) {
       results.push({
         id: note.id,
         type: "note",
         title: note.title ?? "Untitled note",
-        subtitle: note.course?.title ?? "Core note",
+        subtitle: fromHandwriting
+          ? `${courseLabel(note.course) ?? "Core"} · handwriting`
+          : courseLabel(note.course) ?? "Core note",
         href: note.course?.id
           ? `/core?courseId=${note.course.id}&noteId=${note.id}`
           : `/core?noteId=${note.id}`,
+        loopCourseId: note.course?.id,
       });
     }
   }
@@ -156,10 +178,12 @@ export async function searchGlobal(
         id: card.id,
         type: "flashcard",
         title: card.front,
-        subtitle: card.topic.course.title,
+        subtitle: courseLabel(card.topic.course) ?? card.topic.course.title,
         href: card.topic.courseId
           ? `/flashcards?courseId=${card.topic.courseId}`
           : "/flashcards",
+        loopCourseId: card.topic.courseId,
+        loopTopic: card.topic.name,
       });
     }
   }
@@ -168,16 +192,18 @@ export async function searchGlobal(
     if (
       matches(quiz.title, query) ||
       matches(quiz.description, query) ||
-      matches(quiz.course?.title, query)
+      matches(quiz.course?.title, query) ||
+      matches(courseLabel(quiz.course), query)
     ) {
       results.push({
         id: quiz.id,
         type: "quiz",
         title: quiz.title,
-        subtitle: quiz.course?.title ?? "Quiz",
+        subtitle: courseLabel(quiz.course) ?? "Quiz",
         href: quiz.course?.id
           ? `/quizzes?courseId=${quiz.course.id}`
           : `/quizzes/${quiz.id}`,
+        loopCourseId: quiz.course?.id,
       });
     }
   }
@@ -187,14 +213,16 @@ export async function searchGlobal(
       matches(material.title, query) ||
       matches(material.extractedText, query) ||
       matches(material.type, query) ||
-      matches(material.course.title, query)
+      matches(material.course.title, query) ||
+      matches(courseLabel(material.course), query)
     ) {
       results.push({
         id: material.id,
         type: "material",
         title: material.title,
-        subtitle: material.course.title,
+        subtitle: courseLabel(material.course) ?? material.course.title,
         href: `/core?courseId=${material.course.id}&materialId=${material.id}`,
+        loopCourseId: material.course.id,
       });
     }
   }
@@ -205,12 +233,13 @@ export async function searchGlobal(
       month: "short",
       day: "numeric",
     });
-    const context = session.course?.title ?? session.topic?.name ?? "Study session";
+    const context = courseLabel(session.course) ?? session.topic?.name ?? "Study session";
 
     if (
       matches(activityLabel, query) ||
       matches(session.activityType, query) ||
       matches(session.course?.title, query) ||
+      matches(courseLabel(session.course), query) ||
       matches(session.topic?.name, query)
     ) {
       results.push({
@@ -228,13 +257,14 @@ export async function searchGlobal(
       matches(event.title, query) ||
       matches(event.description, query) ||
       matches(event.location, query) ||
-      matches(event.course?.title, query)
+      matches(event.course?.title, query) ||
+      matches(courseLabel(event.course), query)
     ) {
       results.push({
         id: event.id,
         type: "event",
         title: event.title,
-        subtitle: event.course?.title ?? "Calendar event",
+        subtitle: courseLabel(event.course) ?? "Calendar event",
         href: hubCalendarHref({
           date: event.startAt.toISOString().slice(0, 10),
           focus: event.id,
@@ -247,14 +277,15 @@ export async function searchGlobal(
     if (
       matches(topic.name, query) ||
       matches(topic.description, query) ||
-      matches(topic.course.title, query)
+      matches(topic.course.title, query) ||
+      matches(courseLabel(topic.course), query)
     ) {
       const mastery = topic.masteries[0];
       results.push({
         id: topic.id,
         type: "topic",
         title: topic.name,
-        subtitle: topic.course.title,
+        subtitle: courseLabel(topic.course) ?? topic.course.title,
         href: buildSixHrefForTopic({
           topicId: topic.id,
           topicName: topic.name,
@@ -265,6 +296,8 @@ export async function searchGlobal(
           application: mastery?.application,
           reviewCount: mastery?.reviewCount,
         }),
+        loopCourseId: topic.course.id,
+        loopTopic: topic.name,
       });
     }
   }

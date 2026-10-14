@@ -23,7 +23,7 @@ export function CourseContentModal({
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-end justify-center p-0 sm:items-center sm:p-4">
+    <div className="fixed inset-0 z-[600] flex items-end justify-center p-0 sm:items-center sm:p-4">
       <button
         type="button"
         aria-label="Close"
@@ -48,8 +48,12 @@ export function CourseContentModal({
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-5">
-          <div className="whitespace-pre-wrap text-sm leading-relaxed text-stone-700">{children}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-5 text-sm leading-relaxed text-stone-700">
+          {typeof children === "string" ? (
+            <div className="whitespace-pre-wrap">{children}</div>
+          ) : (
+            children
+          )}
         </div>
         {footer ? (
           <div className="border-t border-orange-100 px-5 py-4">{footer}</div>

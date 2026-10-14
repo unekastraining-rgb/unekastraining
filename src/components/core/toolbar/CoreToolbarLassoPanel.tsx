@@ -12,10 +12,12 @@ export function CoreToolbarLassoPanel({
   state,
   onChange,
   onClose,
+  onBack,
 }: {
   state: CoreToolbarState;
   onChange: (patch: Partial<CoreToolbarState>) => void;
   onClose: () => void;
+  onBack?: () => void;
 }) {
   const lasso = state.lasso;
 
@@ -24,7 +26,7 @@ export function CoreToolbarLassoPanel({
   }
 
   return (
-    <CoreToolbarShell title="Lasso" onClose={onClose}>
+    <CoreToolbarShell title="Lasso" onClose={onClose} onBack={onBack}>
       <p className="mb-2 text-xs font-bold uppercase tracking-wider text-stone-400">Type</p>
       <div className="mb-3 flex flex-wrap gap-2">
         <OptionChip

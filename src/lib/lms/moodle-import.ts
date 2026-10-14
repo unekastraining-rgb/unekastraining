@@ -1,14 +1,22 @@
 import { AssignmentKind, AssignmentStatus, MaterialType } from "@/generated/prisma";
+import { readableCourseCode, readableCourseTitle } from "@/lib/courses/display-name";
 import { db } from "@/lib/db";
 import {
   calendarEventsToWeeklyMeetings,
+  isWeeklyClassEventTitle,
   parseMeetingScheduleFromText,
   upsertClassMeetings,
 } from "@/lib/lms/meetings";
 import type { MoodleAssignment, MoodleCalendarEvent, MoodleCourse } from "@/lib/lms/moodle-api";
+import { buildMoodleColdStartSyllabusText } from "@/lib/lms/moodle-cold-start";
 import { extractInstructorFromText } from "@/lib/lms/moodle-syllabus";
-import { enrichCourseFromSyllabus } from "@/lib/syllabus/enrich-course-from-syllabus";
+import {
+  enrichCourseFromSyllabus,
+  seedTopicsFromSyllabusOutline,
+} from "@/lib/syllabus/enrich-course-from-syllabus";
 import { syncCourseInfoAfterMoodleImport } from "@/lib/lms/course-info/sync-course-info";
+import { formatColdStartSyncMessage } from "@/lib/lms/cold-start-sync-message";
+import { lmsColdStartCourseEntry } from "@/lib/lms/cold-start-course-entry";
 import type { LmsSyncStats } from "@/lib/lms/sync";
 
 function inferKind(title: string, fallback: AssignmentKind = AssignmentKind.ASSIGNMENT): AssignmentKind {
@@ -27,6 +35,8 @@ function formatSyncMessage(
   gradesUpdated: number,
   syllabiImported: number,
   plansGenerated: number,
+  topicsCreated: number,
+  courseTitles: string[],
 ): string {
   const parts = [`Synced ${coursesFound} Moodle course${coursesFound === 1 ? "" : "s"}`];
   if (assignmentsImported > 0) {
@@ -49,7 +59,11 @@ function formatSyncMessage(
   if (gradesUpdated > 0) {
     message += ` Updated ${gradesUpdated} grade${gradesUpdated === 1 ? "" : "s"}.`;
   }
-  return message;
+  return formatColdStartSyncMessage(message, {
+    syllabiImported,
+    topicsCreated,
+    courseTitles,
+  });
 }
 
 export interface MoodleImportAssignment extends Omit<MoodleAssignment, "grade"> {
@@ -69,6 +83,8 @@ export interface MoodleImportCourse extends MoodleCourse {
   syllabusText?: string | null;
   syllabusUrl?: string | null;
   syllabusModuleName?: string | null;
+  /** Section/module outline for Study topic cold start when syllabus is thin. */
+  modulesOutline?: string | null;
 }
 
 async function upsertAssignment(
@@ -141,22 +157,43 @@ export async function importMoodleCourses(
   let meetingsImported = 0;
   let syllabiImported = 0;
   let plansGenerated = 0;
+  let topicsCreated = 0;
+  const courseTitles: string[] = [];
+  const coldStartCourses: NonNullable<LmsSyncStats["coldStartCourses"]> = [];
 
   for (const moodleCourse of courses) {
+    const displayTitle = readableCourseTitle(
+      moodleCourse.fullname,
+      moodleCourse.shortname ?? null,
+    );
+    const displayCode =
+      readableCourseCode({
+        code: moodleCourse.shortname ?? null,
+        title: moodleCourse.fullname,
+      }) ??
+      moodleCourse.shortname ??
+      String(moodleCourse.id);
     const instructor = moodleCourse.syllabusText
       ? extractInstructorFromText(moodleCourse.syllabusText)
       : null;
 
-    let course = await db.course.findFirst({
-      where: { userId, title: moodleCourse.fullname },
-    });
+    let course =
+      (await db.course.findFirst({
+        where: { userId, moodleCourseId: moodleCourse.id },
+      })) ??
+      (await db.course.findFirst({
+        where: { userId, title: moodleCourse.fullname },
+      })) ??
+      (await db.course.findFirst({
+        where: { userId, title: displayTitle },
+      }));
 
     if (!course) {
       course = await db.course.create({
         data: {
           userId,
-          title: moodleCourse.fullname,
-          code: moodleCourse.shortname ?? String(moodleCourse.id),
+          title: displayTitle,
+          code: displayCode,
           description: `Imported from Moodle (${moodleCourse.id})`,
           instructor,
           moodleCourseId: moodleCourse.id,
@@ -169,15 +206,23 @@ export async function importMoodleCourses(
         where: { id: course.id },
         data: {
           moodleCourseId: moodleCourse.id,
+          title: displayTitle,
+          code: displayCode,
           ...(instructor && shouldRefreshInstructor(course.instructor, instructor)
             ? { instructor }
             : {}),
         },
       });
-      if (instructor && shouldRefreshInstructor(course.instructor, instructor)) {
-        course = { ...course, instructor };
-      }
+      course = {
+        ...course,
+        title: displayTitle,
+        code: displayCode,
+        ...(instructor && shouldRefreshInstructor(course.instructor, instructor)
+          ? { instructor }
+          : {}),
+      };
     }
+    courseTitles.push(displayTitle);
 
     const assignTitles = new Set<string>();
 
@@ -220,9 +265,19 @@ export async function importMoodleCourses(
       if (result.imported) assignmentsImported += 1;
     }
 
-    if (moodleCourse.syllabusText?.trim()) {
+    const coldStart = buildMoodleColdStartSyllabusText({
+      courseName: displayTitle,
+      syllabusText: moodleCourse.syllabusText,
+      modulesOutline: moodleCourse.modulesOutline,
+    });
+    const syllabusText = coldStart.text;
+
+    if (coldStart.seeded) {
       const syllabusTitle =
-        moodleCourse.syllabusModuleName ?? `${moodleCourse.shortname ?? "Course"} Syllabus`;
+        moodleCourse.syllabusModuleName ??
+        (coldStart.usedModules
+          ? `${displayTitle} modules`
+          : `${displayTitle} Syllabus`);
       const existingSyllabus = await db.courseMaterial.findFirst({
         where: { courseId: course.id, type: MaterialType.SYLLABUS },
       });
@@ -233,7 +288,7 @@ export async function importMoodleCourses(
           data: {
             title: syllabusTitle,
             url: moodleCourse.syllabusUrl,
-            extractedText: moodleCourse.syllabusText,
+            extractedText: syllabusText,
           },
         });
       } else {
@@ -243,12 +298,26 @@ export async function importMoodleCourses(
             title: syllabusTitle,
             type: MaterialType.SYLLABUS,
             url: moodleCourse.syllabusUrl,
-            extractedText: moodleCourse.syllabusText,
+            extractedText: syllabusText,
             sortOrder: 0,
           },
         });
         syllabiImported += 1;
       }
+    }
+
+    // Drop prior mis-imports (e.g. discussion forum dues turned into weekly meetings).
+    const existingMeetings = await db.classMeeting.findMany({
+      where: { courseId: course.id },
+      select: { id: true, title: true },
+    });
+    const staleMeetingIds = existingMeetings
+      .filter((meeting) => meeting.title && !isWeeklyClassEventTitle(meeting.title))
+      .map((meeting) => meeting.id);
+    if (staleMeetingIds.length > 0) {
+      await db.classMeeting.deleteMany({
+        where: { id: { in: staleMeetingIds } },
+      });
     }
 
     const events = moodleCourse.calendarEvents.map((event) => {
@@ -273,22 +342,60 @@ export async function importMoodleCourses(
     if (moodleCourse.syllabusText) {
       const fromSyllabus = parseMeetingScheduleFromText(moodleCourse.syllabusText);
       meetingsImported += await upsertClassMeetings(course.id, fromSyllabus);
+    }
 
+    if (coldStart.seeded) {
       try {
         const enriched = await enrichCourseFromSyllabus({
           userId,
           courseId: course.id,
-          syllabusText: moodleCourse.syllabusText,
-          courseTitle: moodleCourse.fullname,
-          courseCode: moodleCourse.shortname ?? null,
+          syllabusText,
+          courseTitle: displayTitle,
+          courseCode: displayCode,
           instructor: course.instructor,
         });
         if (enriched.planGenerated) plansGenerated += 1;
+        topicsCreated += enriched.topicsCreated;
       } catch (error) {
         console.warn("Syllabus AI enrichment failed for course", course.id, error);
       }
 
+      // Prefer real Moodle module sections over generic "Course outcomes" fallbacks.
+      if (coldStart.usedModules && moodleCourse.modulesOutline?.trim()) {
+        await db.topic.deleteMany({
+          where: {
+            courseId: course.id,
+            name: {
+              in: [
+                "Course outcomes",
+                "Readings & modules",
+                "Assignments & projects",
+                "Exams & quizzes",
+              ],
+            },
+          },
+        });
+        topicsCreated += await seedTopicsFromSyllabusOutline(
+          course.id,
+          moodleCourse.modulesOutline,
+        );
+      } else {
+        topicsCreated += await seedTopicsFromSyllabusOutline(course.id, syllabusText);
+      }
+
+      coldStartCourses.push(
+        lmsColdStartCourseEntry(
+          course.id,
+          displayTitle,
+          moodleCourse.modulesOutline?.trim() || syllabusText,
+        ),
+      );
+    }
+
+    try {
       await syncCourseInfoAfterMoodleImport(userId, course.id, moodleCourse.id);
+    } catch (error) {
+      console.warn("Course info sync failed for Moodle course", moodleCourse.id, error);
     }
   }
 
@@ -300,6 +407,7 @@ export async function importMoodleCourses(
     gradesUpdated,
     meetingsImported,
     usedDemo: false,
+    coldStartCourses: coldStartCourses.length > 0 ? coldStartCourses : undefined,
     message: formatSyncMessage(
       courses.length,
       assignmentsImported,
@@ -307,6 +415,8 @@ export async function importMoodleCourses(
       gradesUpdated,
       syllabiImported,
       plansGenerated,
+      topicsCreated,
+      courseTitles,
     ),
   };
 }

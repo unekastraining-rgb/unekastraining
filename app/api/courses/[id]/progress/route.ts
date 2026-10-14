@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { AssignmentStatus } from "@/generated/prisma";
 import { db } from "@/lib/db";
+import { readableCourseName } from "@/lib/courses/display-name";
 import { getOrCreateDefaultUser } from "@/lib/user";
 
 export async function GET(
@@ -14,7 +15,7 @@ export async function GET(
 
     const course = await db.course.findFirst({
       where: { id, userId: user.id },
-      select: { id: true, title: true },
+      select: { id: true, title: true, code: true },
     });
 
     if (!course) {
@@ -77,7 +78,7 @@ export async function GET(
       success: true,
       data: {
         courseId: id,
-        courseTitle: course.title,
+        courseTitle: readableCourseName(course),
         overallMastery,
         topicsTracked: masteries.length,
         minutesThisWeek,

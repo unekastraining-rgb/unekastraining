@@ -1,8 +1,15 @@
 import { notFound } from "next/navigation";
 
 import { HubBackBar } from "@/components/hub/HubBackBar";
+import {
+  readableCourseCode,
+  readableCourseName,
+  readableMeetingTitle,
+} from "@/lib/courses/display-name";
 import { db } from "@/lib/db";
+import { enrichAssignmentsWithConceptLinks } from "@/lib/learning/school-lms";
 import { parseStudyTopicFromMaterial } from "@/lib/study-topic/parse";
+import { backfillCourseTopicsIfEmpty } from "@/lib/syllabus/enrich-course-from-syllabus";
 import { getOrCreateDefaultUser } from "@/lib/user";
 
 import { CourseDetailView } from "./course-detail-view";
@@ -40,18 +47,55 @@ export default async function CourseDetailPage({
     notFound();
   }
 
+  await backfillCourseTopicsIfEmpty(course.id);
+
+  const refreshedTopics = await db.topic.findMany({
+    where: { courseId: course.id },
+    orderBy: { name: "asc" },
+    include: {
+      masteries: {
+        where: { userId: user.id },
+        take: 1,
+      },
+    },
+  });
+
   const studyTopic = course.materials
     .map((material) => parseStudyTopicFromMaterial(material.extractedText))
     .find((profile) => profile !== null) ?? null;
 
+  // 2P-49 — soft assignment → concept enrichment (same bridge as Hub).
+  const topicsForBridge = refreshedTopics
+    .filter((t) => t.conceptId)
+    .map((t) => ({
+      id: t.id,
+      name: t.name,
+      courseId: course.id,
+      conceptId: t.conceptId,
+    }));
+  const enrichedAssignments = enrichAssignmentsWithConceptLinks(
+    course.assignments.map((assignment) => ({
+      id: assignment.id,
+      title: assignment.title,
+      description: assignment.description,
+      dueDate: assignment.dueDate?.toISOString() ?? null,
+      status: assignment.status,
+      kind: assignment.kind,
+      grade: assignment.grade,
+      maxGrade: assignment.maxGrade,
+      courseId: course.id,
+    })),
+    topicsForBridge,
+  );
+
   return (
     <>
-      <HubBackBar title={course.title} />
+      <HubBackBar title={readableCourseName(course)} />
       <CourseDetailView
         course={{
           id: course.id,
-          title: course.title,
-          code: course.code,
+          title: readableCourseName(course),
+          code: readableCourseCode(course),
           instructor: course.instructor,
           semester: course.semester,
           description: course.description,
@@ -62,15 +106,17 @@ export default async function CourseDetailPage({
           courseInfoJson: course.courseInfoJson,
           quizCount: course._count.quizzes,
           sessionCount: course._count.studySessions,
-          assignments: course.assignments.map((assignment) => ({
+          assignments: enrichedAssignments.map((assignment) => ({
             id: assignment.id,
             title: assignment.title,
             description: assignment.description,
-            dueDate: assignment.dueDate?.toISOString() ?? null,
+            dueDate: assignment.dueDate,
             status: assignment.status,
             kind: assignment.kind,
             grade: assignment.grade,
             maxGrade: assignment.maxGrade,
+            conceptId: assignment.conceptId,
+            alignmentState: assignment.alignmentState,
           })),
           materials: course.materials.map((material) => ({
             id: material.id,
@@ -83,9 +129,9 @@ export default async function CourseDetailPage({
             startTime: meeting.startTime,
             endTime: meeting.endTime,
             location: meeting.location,
-            title: meeting.title,
+            title: readableMeetingTitle(meeting.title, course),
           })),
-          topics: course.topics.map((topic) => {
+          topics: refreshedTopics.map((topic) => {
             const mastery = topic.masteries[0];
             return {
               id: topic.id,

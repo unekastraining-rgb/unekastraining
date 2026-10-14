@@ -104,7 +104,7 @@ export function bindPointerResize(options: {
   function onMove(event: PointerEvent) {
     const dx = event.clientX - originX;
     const dy = event.clientY - originY;
-    let width = Math.max(24, startW + dx);
+    const width = Math.max(24, startW + dx);
     let height = Math.max(24, startH + dy);
     if (options.aspectLock && startW > 0) {
       const ratio = startH / startW;

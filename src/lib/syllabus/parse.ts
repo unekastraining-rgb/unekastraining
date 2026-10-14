@@ -76,7 +76,10 @@ function parseJsonFromResponse(content: string): SyllabusExtraction {
   };
 }
 
-async function parseSyllabusWithAI(text: string): Promise<SyllabusExtraction> {
+async function parseSyllabusWithAI(
+  text: string,
+  includeOpenAIPro?: boolean,
+): Promise<SyllabusExtraction> {
   const result = await aiService.complete(
     [
       {
@@ -93,6 +96,7 @@ async function parseSyllabusWithAI(text: string): Promise<SyllabusExtraction> {
       temperature: 0.1,
       maxTokens: 2048,
       jsonMode: true,
+      includeOpenAIPro,
     },
   );
 
@@ -101,7 +105,7 @@ async function parseSyllabusWithAI(text: string): Promise<SyllabusExtraction> {
 
 export async function parseSyllabusText(
   text: string,
-  options?: { fileName?: string; preferAI?: boolean },
+  options?: { fileName?: string; preferAI?: boolean; includeOpenAIPro?: boolean },
 ): Promise<{ extraction: SyllabusExtraction; parser: SyllabusParserMode }> {
   const heuristic = parseSyllabusHeuristic(text, options?.fileName);
 
@@ -114,7 +118,7 @@ export async function parseSyllabusText(
   }
 
   try {
-    const aiExtraction = await parseSyllabusWithAI(text);
+    const aiExtraction = await parseSyllabusWithAI(text, options?.includeOpenAIPro);
     return {
       extraction: mergeSyllabusExtractions(heuristic, aiExtraction),
       parser: "hybrid",

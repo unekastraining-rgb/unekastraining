@@ -1,5 +1,13 @@
 import { db } from "@/lib/db";
 
+export {
+  readableCourseCode,
+  readableCourseName,
+  readableCourseTitle,
+  readableMeetingTitle,
+  withReadableCourse,
+} from "@/lib/courses/display-name";
+
 export function coursePath(courseId: string): string {
   return `/courses/${courseId}`;
 }

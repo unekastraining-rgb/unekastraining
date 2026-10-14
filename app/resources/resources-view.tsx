@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   FolderOpen,
   Plus,
@@ -15,8 +15,10 @@ import {
   type ResourceFormValues,
 } from "@/components/resources/ResourceFormModal";
 import { ResourceLibrarySettingsPanel } from "@/components/resources/ResourceLibrarySettingsPanel";
-import { confirmDelete } from "@/lib/confirm-delete";
+import { BulkSelectionBar } from "@/components/ui/BulkSelectionBar";
+import { confirmDelete, confirmDeleteMany } from "@/lib/confirm-delete";
 import { filterResources } from "@/lib/resources/search";
+import { useSelectableIds } from "@/lib/selection/use-selectable-ids";
 import {
   RESOURCE_FILTER_OPTIONS,
   RESOURCE_SORT_OPTIONS,
@@ -46,11 +48,20 @@ export function ResourcesView({
   const [aiQuestion, setAiQuestion] = useState("");
   const [aiResults, setAiResults] = useState<ResourceRecord[] | null>(null);
   const [discovering, setDiscovering] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   const displayed = useMemo(() => {
     if (aiResults) return aiResults;
     return filterResources(resources, { query, category, sort });
   }, [resources, query, category, sort, aiResults]);
+
+  const displayedIds = useMemo(() => displayed.map((r) => r.id), [displayed]);
+  const selection = useSelectableIds(displayedIds);
+
+  useEffect(() => {
+    selection.pruneTo(displayedIds);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [displayedIds.join("|")]);
 
   async function persistSettings(patch: Partial<ResourcesLibrarySettings>) {
     const next = { ...settings, ...patch };
@@ -106,6 +117,31 @@ export function ResourcesView({
     }
     setResources((current) => current.filter((item) => item.id !== resource.id));
     setAiResults(null);
+  }
+
+  async function deleteSelectedResources() {
+    const ids = selection.selectedIds;
+    if (ids.length === 0) return;
+    if (!confirmDeleteMany(ids.length, { noun: "resource" })) return;
+    setBulkDeleting(true);
+    try {
+      const response = await fetch("/api/resources", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
+      });
+      const data = await response.json();
+      if (!data.success) {
+        alert(data.error ?? "Failed to delete resources.");
+        return;
+      }
+      const removed = new Set(ids);
+      setResources((current) => current.filter((item) => !removed.has(item.id)));
+      setAiResults(null);
+      selection.clear();
+    } finally {
+      setBulkDeleting(false);
+    }
   }
 
   async function openResource(resource: ResourceRecord) {
@@ -291,6 +327,20 @@ export function ResourcesView({
           {displayed.length} resource{displayed.length === 1 ? "" : "s"}
         </p>
 
+        {displayed.length > 0 ? (
+          <BulkSelectionBar
+            totalCount={displayed.length}
+            selectedCount={selection.selectedCount}
+            allSelected={selection.allSelected}
+            someSelected={selection.someSelected}
+            onToggleAll={selection.toggleAll}
+            onClear={selection.clear}
+            onDeleteSelected={() => void deleteSelectedResources()}
+            deleting={bulkDeleting}
+            noun="resource"
+          />
+        ) : null}
+
         {displayed.length === 0 ? (
           <div className="resources-empty">
             <div className="resources-empty-icon">
@@ -326,6 +376,8 @@ export function ResourcesView({
                   setFormOpen(true);
                 }}
                 onDelete={deleteResource}
+                selected={selection.isSelected(resource.id)}
+                onToggleSelect={(item) => selection.toggle(item.id)}
               />
             ))}
           </div>
@@ -343,6 +395,8 @@ export function ResourcesView({
                   setFormOpen(true);
                 }}
                 onDelete={deleteResource}
+                selected={selection.isSelected(resource.id)}
+                onToggleSelect={(item) => selection.toggle(item.id)}
               />
             ))}
           </div>

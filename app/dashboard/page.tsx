@@ -11,13 +11,34 @@ import { getGradeSchoolProgress, progressByCourse } from "@/lib/grade-school/pro
 import { getOrCreateUserPreferences } from "@/lib/preferences";
 import { countQuizAttempts } from "@/lib/quizzes/attempts";
 import { fetchHubTodayCalendarEvents } from "@/lib/hub/dashboard-calendar";
+import {
+  attachPortalDates,
+  buildWeeklyCollegeGrid,
+} from "@/lib/schedule/weekly-college-grid";
 import { db } from "@/lib/db";
 import { getOrCreateDefaultUser } from "@/lib/user";
+import { backfillUserCourseTopicsIfEmpty } from "@/lib/syllabus/enrich-course-from-syllabus";
+import {
+  readableCourseCode,
+  readableCourseName,
+  readableCourseTitle,
+  readableMeetingTitle,
+} from "@/lib/courses/display-name";
+import { parseHubTab } from "@/lib/hub/tabs";
+import { localDateKey } from "@/lib/calendar/types";
+import { enrichAssignmentsWithConceptLinks } from "@/lib/learning/school-lms";
 
 export const dynamic = "force-dynamic";
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string }>;
+}) {
+  const params = await searchParams;
+  const initialTab = parseHubTab(params.tab ?? null);
   const user = await getOrCreateDefaultUser();
+  await backfillUserCourseTopicsIfEmpty(user.id);
   const now = new Date();
 
   const [
@@ -36,10 +57,11 @@ export default async function DashboardPage() {
     gradeSchoolProgressRows,
     notificationPrefs,
     todayCalendarEvents,
+    assignmentTopics,
   ] = await Promise.all([
     db.course.findMany({
       where: { userId: user.id },
-      orderBy: { createdAt: "desc" },
+      orderBy: { updatedAt: "desc" },
       include: {
         _count: {
           select: { assignments: true, materials: true },
@@ -50,6 +72,11 @@ export default async function DashboardPage() {
           take: 1,
           select: { extractedText: true },
         },
+        topics: {
+          orderBy: { sortOrder: "asc" },
+          take: 24,
+          select: { name: true },
+        },
       },
     }),
     db.assignment.findMany({
@@ -59,6 +86,7 @@ export default async function DashboardPage() {
           select: {
             id: true,
             title: true,
+            code: true,
             color: true,
             materials: { select: { type: true }, take: 1 },
           },
@@ -69,14 +97,14 @@ export default async function DashboardPage() {
     db.classMeeting.findMany({
       where: { course: { userId: user.id } },
       include: {
-        course: { select: { id: true, title: true, color: true } },
+        course: { select: { id: true, title: true, code: true, color: true } },
       },
       orderBy: [{ dayOfWeek: "asc" }, { startTime: "asc" }],
     }),
     db.courseMaterial.findMany({
       where: { course: { userId: user.id } },
       include: {
-        course: { select: { id: true, title: true, color: true } },
+        course: { select: { id: true, title: true, code: true, color: true } },
       },
       orderBy: { createdAt: "desc" },
       take: 20,
@@ -114,7 +142,7 @@ export default async function DashboardPage() {
       where: { userId: user.id, proficiency: { lt: 0.55 } },
       include: {
         topic: {
-          include: { course: { select: { title: true } } },
+          include: { course: { select: { title: true, code: true } } },
         },
       },
       orderBy: { proficiency: "asc" },
@@ -125,6 +153,11 @@ export default async function DashboardPage() {
     getGradeSchoolProgress(),
     getNotificationPrefs(user.id),
     fetchHubTodayCalendarEvents(user.id, now),
+    // 2P-31 — topics with concept links for assignment → Adaptive CTAs
+    db.topic.findMany({
+      where: { course: { userId: user.id }, conceptId: { not: null } },
+      select: { id: true, name: true, courseId: true, conceptId: true },
+    }),
   ]);
 
   const overallMastery =
@@ -157,19 +190,21 @@ export default async function DashboardPage() {
     overdueAssignments: overdueAssignments.map((assignment) => ({
       id: assignment.id,
       title: assignment.title,
-      courseTitle: assignment.course.title,
+      courseId: assignment.courseId,
+      courseTitle: readableCourseTitle(assignment.course.title, assignment.course.code),
     })),
     dueSoonAssignments: dueSoonAssignments.map((assignment) => ({
       id: assignment.id,
       title: assignment.title,
-      courseTitle: assignment.course.title,
+      courseId: assignment.courseId,
+      courseTitle: readableCourseTitle(assignment.course.title, assignment.course.code),
       dueDate: assignment.dueDate!,
     })),
     weakTopics: weakTopicRows.map((row) => ({
       id: row.topicId,
       name: row.topic.name,
       courseId: row.topic.courseId,
-      courseTitle: row.topic.course.title,
+      courseTitle: readableCourseTitle(row.topic.course.title, row.topic.course.code),
       proficiency: row.proficiency,
       understanding: row.understanding,
       recall: row.recall,
@@ -178,6 +213,7 @@ export default async function DashboardPage() {
     })),
     missedQuestions,
     dueFlashcards,
+    primaryCourseId: courses[0]?.id ?? weakTopicRows[0]?.topic.courseId ?? null,
   });
 
   const progress = buildProgressSnapshot(masteries, quizAttempts);
@@ -186,14 +222,14 @@ export default async function DashboardPage() {
 
   const progressMap = progressByCourse(gradeSchoolProgressRows);
 
-  const todayKey = now.toISOString().slice(0, 10);
+  const todayKey = localDateKey(now);
   const todayTasks = todayCalendarEvents.length;
 
   const latestSession = studyTelemetry.recentSessions[0] ?? null;
   const latestNote = await db.note.findFirst({
     where: { userId: user.id },
     orderBy: { updatedAt: "desc" },
-    include: { course: { select: { id: true, title: true } } },
+    include: { course: { select: { id: true, title: true, code: true } } },
   });
 
   const jumpBackIn = latestSession?.courseTitle
@@ -203,18 +239,24 @@ export default async function DashboardPage() {
         href: latestSession.courseId
           ? `/courses/${latestSession.courseId}`
           : "/study",
+        courseId: latestSession.courseId ?? null,
       }
     : latestNote
       ? {
           title: latestNote.title ?? "Your notebook",
-          subtitle: latestNote.course?.title ?? "Core notes",
+          subtitle: latestNote.course
+            ? readableCourseTitle(latestNote.course.title, latestNote.course.code)
+            : "Core notes",
           href: `/core?courseId=${latestNote.courseId ?? ""}&noteId=${latestNote.id}`,
+          courseId: latestNote.courseId ?? latestNote.course?.id ?? null,
+          topic: latestNote.title?.trim() || null,
         }
       : courses[0]
         ? {
-            title: courses[0].title,
+            title: readableCourseName(courses[0]),
             subtitle: "Open your class",
             href: `/courses/${courses[0].id}`,
+            courseId: courses[0].id,
           }
         : null;
 
@@ -237,54 +279,64 @@ export default async function DashboardPage() {
 
       return courses.map((course) => ({
         id: course.id,
-        title: course.title,
-        code: course.code,
+        title: readableCourseName(course),
+        code: readableCourseCode(course),
         instructor: course.instructor,
         semester: course.semester,
         color: course.color,
         assignmentCount: course._count.assignments,
         materialCount: course._count.materials,
         meetingCount: meetingsByCourse.get(course.id) ?? 0,
+        topics: course.topics.map((topic) => topic.name),
       }));
     })(),
-    assignments: assignments.map((assignment) => ({
-      id: assignment.id,
-      title: assignment.title,
-      description: assignment.description,
-      dueDate: assignment.dueDate?.toISOString() ?? null,
-      kind: assignment.kind,
-      status: assignment.status,
-      grade: assignment.grade,
-      maxGrade: assignment.maxGrade,
-      courseId: assignment.courseId,
-      courseTitle: assignment.course.title,
-      courseColor: assignment.course.color,
-      source: assignment.course.materials.some(
-        (material) => material.type === "SYLLABUS",
-      )
-        ? "syllabus"
-        : "manual",
-    })),
+    assignments: enrichAssignmentsWithConceptLinks(
+      assignments.map((assignment) => ({
+        id: assignment.id,
+        title: assignment.title,
+        description: assignment.description,
+        dueDate: assignment.dueDate?.toISOString() ?? null,
+        kind: assignment.kind,
+        status: assignment.status,
+        grade: assignment.grade,
+        maxGrade: assignment.maxGrade,
+        courseId: assignment.courseId,
+        courseTitle: readableCourseTitle(assignment.course.title, assignment.course.code),
+        courseColor: assignment.course.color,
+        source: assignment.course.materials.some(
+          (material) => material.type === "SYLLABUS",
+        )
+          ? ("syllabus" as const)
+          : ("manual" as const),
+      })),
+      assignmentTopics.map((t) => ({
+        id: t.id,
+        name: t.name,
+        courseId: t.courseId,
+        conceptId: t.conceptId,
+      })),
+    ),
     meetings: meetings.map((meeting) => ({
       id: meeting.id,
       courseId: meeting.courseId,
-      courseTitle: meeting.course.title,
+      courseTitle: readableCourseTitle(meeting.course.title, meeting.course.code),
       courseColor: meeting.course.color,
       dayOfWeek: meeting.dayOfWeek,
       startTime: meeting.startTime,
       endTime: meeting.endTime,
       location: meeting.location,
-      title: meeting.title,
+      title: readableMeetingTitle(meeting.title, meeting.course),
     })),
     materials: materials.map((material) => ({
       id: material.id,
       title: material.title,
       type: material.type,
       courseId: material.courseId,
-      courseTitle: material.course.title,
+      courseTitle: readableCourseTitle(material.course.title, material.course.code),
       courseColor: material.course.color,
     })),
     todayCalendarEvents,
+    todayKey,
     stats: {
       pendingAssignments,
       dueFlashcards,
@@ -312,7 +364,7 @@ export default async function DashboardPage() {
         const progress = progressMap.get(course.id);
         return {
           courseId: course.id,
-          courseTitle: course.title,
+          courseTitle: readableCourseName(course),
           courseColor: course.color,
           curriculum,
           completedSteps: progress?.completedSteps ?? [],
@@ -320,7 +372,21 @@ export default async function DashboardPage() {
         };
       })
       .filter((plan): plan is NonNullable<typeof plan> => plan !== null),
+    weeklySchedule:
+      courses.length === 0
+        ? null
+        : buildWeeklyCollegeGrid({
+            courses: courses.map((course) => attachPortalDates(course)),
+            meetings: meetings.map((meeting) => ({
+              courseId: meeting.courseId,
+              dayOfWeek: meeting.dayOfWeek,
+              startTime: meeting.startTime,
+              endTime: meeting.endTime,
+              title: meeting.title,
+              location: meeting.location,
+            })),
+          }),
   };
 
-  return <AcademicHub data={hubData} />;
+  return <AcademicHub data={hubData} initialTab={initialTab} />;
 }

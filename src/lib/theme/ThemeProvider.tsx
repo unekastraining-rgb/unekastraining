@@ -46,7 +46,11 @@ export function ThemeProvider({
 }) {
   const [settings, setSettings] = useState<UserThemeSettings>(() => {
     if (initialSettings) return initialSettings;
-    return readStoredSettings() ?? DEFAULT_THEME_SETTINGS;
+    // Client-only stored theme — lazy init avoids setState-in-effect hydration cascade.
+    if (typeof window !== "undefined") {
+      return readStoredSettings() ?? DEFAULT_THEME_SETTINGS;
+    }
+    return DEFAULT_THEME_SETTINGS;
   });
   const [loading, setLoading] = useState(false);
 
@@ -70,6 +74,7 @@ export function ThemeProvider({
         await fetch("/api/preferences", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
           body: JSON.stringify(patch),
         });
       } catch (error) {

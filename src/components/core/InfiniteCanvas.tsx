@@ -5,10 +5,15 @@ import { Plus, StickyNote } from "lucide-react";
 
 import type { CanvasShape, CanvasSticky, InfiniteCanvasData, SketchStroke } from "@/lib/core/note-types";
 import {
+  computeCanvasBufferPixels,
+  resolveCanvasCssSize,
+} from "@/lib/core/canvas-buffer-size";
+import {
   drawShape,
   drawStroke,
   drawStrokes,
   eraseAtPoint,
+  normalizePressure,
   pointerFromEvent,
   selectStrokesInLasso,
   shouldRejectPointer,
@@ -31,6 +36,7 @@ export function InfiniteCanvas({
   lineWidth,
   pencilOnly,
   shapeKind = "rect",
+  dark = false,
 }: {
   data: InfiniteCanvasData;
   onChange: (data: InfiniteCanvasData) => void;
@@ -40,6 +46,7 @@ export function InfiniteCanvas({
   lineWidth: number;
   pencilOnly: boolean;
   shapeKind?: ShapeKind;
+  dark?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -53,6 +60,8 @@ export function InfiniteCanvas({
   const [selectedStrokeIds, setSelectedStrokeIds] = useState<Set<string>>(new Set());
   const dragSelection = useRef<{ x: number; y: number } | null>(null);
   const spaceHeld = useRef(false);
+  const activeTouches = useRef(new Set<number>());
+  const multiTouchPan = useRef(false);
 
   const { viewport, strokes, stickies, shapes } = data;
 
@@ -83,21 +92,65 @@ export function InfiniteCanvas({
     if (!ctx) return;
 
     const rect = container.getBoundingClientRect();
-    const ratio = window.devicePixelRatio || 1;
-    canvas.width = rect.width * ratio;
-    canvas.height = rect.height * ratio;
-    canvas.style.width = `${rect.width}px`;
-    canvas.style.height = `${rect.height}px`;
+    const measured = resolveCanvasCssSize({
+      measureClientWidth: rect.width,
+      measureClientHeight: rect.height,
+      canvasClientWidth: canvas.clientWidth,
+      canvasClientHeight: canvas.clientHeight,
+    });
+    const { cssW, cssH } = measured;
+    const { bw, bh, ratio } = computeCanvasBufferPixels(
+      cssW,
+      cssH,
+      window.devicePixelRatio || 1,
+    );
+    canvas.width = bw;
+    canvas.height = bh;
+    canvas.style.width = `${cssW}px`;
+    canvas.style.height = `${cssH}px`;
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-    ctx.clearRect(0, 0, rect.width, rect.height);
+    ctx.clearRect(0, 0, cssW, cssH);
+
+    // Desk surface behind the infinite board (GoodNotes-adjacent, not flat white Notion).
+    ctx.fillStyle = dark ? "#0c0a09" : "#e7e5e4";
+    ctx.fillRect(0, 0, cssW, cssH);
+    if (!dark) {
+      const wash = ctx.createRadialGradient(
+        cssW * 0.35,
+        cssH * 0.2,
+        40,
+        cssW * 0.5,
+        cssH * 0.45,
+        Math.max(cssW, cssH) * 0.75,
+      );
+      wash.addColorStop(0, "rgba(255,255,255,0.35)");
+      wash.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = wash;
+      ctx.fillRect(0, 0, cssW, cssH);
+    }
 
     ctx.save();
     ctx.translate(viewport.x, viewport.y);
     ctx.scale(viewport.scale, viewport.scale);
 
-    const gridExtent = 4000;
-    ctx.strokeStyle = "#e7e5e4";
+    // Soft paper sheet under the origin so ink sits on a page, not empty void.
+    const sheetW = 816;
+    const sheetH = 1056;
+    ctx.save();
+    ctx.shadowColor = dark ? "rgba(0,0,0,0.55)" : "rgba(28,25,23,0.18)";
+    ctx.shadowBlur = 28 / viewport.scale;
+    ctx.shadowOffsetY = 10 / viewport.scale;
+    ctx.fillStyle = dark ? "#1c1917" : "#fffdf9";
+    ctx.fillRect(0, 0, sheetW, sheetH);
+    ctx.restore();
+    ctx.strokeStyle = dark ? "rgba(255,255,255,0.06)" : "rgba(120,113,108,0.12)";
     ctx.lineWidth = 1 / viewport.scale;
+    ctx.strokeRect(0, 0, sheetW, sheetH);
+
+    const gridExtent = 4000;
+    ctx.strokeStyle = dark ? "#44403c" : "#d6d3d1";
+    ctx.lineWidth = 1 / viewport.scale;
+    ctx.globalAlpha = 0.45;
     for (let x = -gridExtent; x <= gridExtent; x += GRID) {
       ctx.beginPath();
       ctx.moveTo(x, -gridExtent);
@@ -110,6 +163,7 @@ export function InfiniteCanvas({
       ctx.lineTo(gridExtent, y);
       ctx.stroke();
     }
+    ctx.globalAlpha = 1;
 
     for (const shape of shapes) {
       drawShape(ctx, shape);
@@ -118,7 +172,7 @@ export function InfiniteCanvas({
       drawShape(ctx, liveShape.current);
     }
 
-    drawStrokes(ctx, strokes, rect.width, rect.height);
+    drawStrokes(ctx, strokes, cssW, cssH);
     if (currentStroke.current) {
       drawStroke(ctx, currentStroke.current);
     }
@@ -151,10 +205,23 @@ export function InfiniteCanvas({
     }
 
     ctx.restore();
-  }, [shapes, stickies, strokes, viewport]);
+  }, [dark, shapes, stickies, strokes, viewport]);
 
   useEffect(() => {
     redraw();
+    const container = containerRef.current;
+    const observer =
+      typeof ResizeObserver !== "undefined" && container
+        ? new ResizeObserver(() => redraw())
+        : null;
+    if (container) observer?.observe(container);
+    window.addEventListener("resize", redraw);
+    const raf = window.requestAnimationFrame(() => redraw());
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", redraw);
+      window.cancelAnimationFrame(raf);
+    };
   }, [redraw]);
 
   useEffect(() => {
@@ -195,6 +262,15 @@ export function InfiniteCanvas({
     container.addEventListener("wheel", onWheel, { passive: false });
     return () => container.removeEventListener("wheel", onWheel);
   }, [patch, viewport]);
+
+  function abortInProgressStroke() {
+    drawing.current = false;
+    currentStroke.current = null;
+    lassoPoints.current = [];
+    liveShape.current = null;
+    shapeStart.current = null;
+    redraw();
+  }
 
   function finishStroke() {
     if (!drawing.current) return;
@@ -250,8 +326,17 @@ export function InfiniteCanvas({
   }
 
   return (
-    <div className="relative flex h-full min-h-[28rem] flex-col">
-      <div className="flex flex-wrap gap-2 border-b border-orange-100 px-3 py-2">
+    <div
+      data-infinite-canvas
+      className={`relative flex h-full min-h-[28rem] flex-col ${
+        dark ? "bg-stone-950 text-stone-100" : ""
+      }`}
+    >
+      <div
+        className={`flex flex-wrap gap-2 border-b px-3 py-2 ${
+          dark ? "border-stone-800" : "border-orange-100"
+        }`}
+      >
         <button
           type="button"
           onClick={addSticky}
@@ -270,16 +355,30 @@ export function InfiniteCanvas({
           {Math.round(viewport.scale * 100)}% · Space+drag to pan · Scroll to zoom
         </span>
       </div>
-      <div ref={containerRef} className="relative min-h-0 flex-1 overflow-hidden bg-stone-50">
+      <div
+        ref={containerRef}
+        className={`relative min-h-0 flex-1 overflow-hidden ${
+          dark ? "bg-stone-950" : "bg-[#e7e5e4]"
+        }`}
+      >
         <canvas
           ref={canvasRef}
+          data-ink-canvas
           className={`absolute inset-0 h-full w-full ${
-            active ? "cursor-crosshair touch-none" : "pointer-events-none"
-          } ${inkTool === "hand" || spaceHeld.current ? "cursor-grab" : ""}`}
+            active
+              ? pencilOnly
+                ? "cursor-crosshair"
+                : "cursor-crosshair touch-none"
+              : "pointer-events-none"
+          } ${inkTool === "hand" ? "cursor-grab" : ""}`}
           style={active ? { touchAction: "none" } : undefined}
           onPointerDown={(event) => {
             if (!active) return;
             const world = screenToWorld(event.clientX, event.clientY);
+
+            if (event.pointerType === "touch") {
+              activeTouches.current.add(event.pointerId);
+            }
 
             if (inkTool === "hand" || spaceHeld.current || event.button === 1) {
               panning.current = true;
@@ -293,13 +392,47 @@ export function InfiniteCanvas({
               return;
             }
 
+            // Pencil-only: finger pans the infinite canvas instead of inking.
+            if (shouldRejectPointer(event, pencilOnly)) {
+              panning.current = true;
+              panStart.current = {
+                x: event.clientX,
+                y: event.clientY,
+                vx: viewport.x,
+                vy: viewport.y,
+              };
+              canvasRef.current?.setPointerCapture(event.pointerId);
+              return;
+            }
+
+            // Two-finger pan while finger-writing (whiteboard / no Pencil).
+            if (event.pointerType === "touch" && activeTouches.current.size > 1) {
+              if (drawing.current) {
+                if (canvasRef.current?.hasPointerCapture(event.pointerId)) {
+                  try {
+                    canvasRef.current.releasePointerCapture(event.pointerId);
+                  } catch {
+                    // ignore
+                  }
+                }
+                abortInProgressStroke();
+              }
+              multiTouchPan.current = true;
+              panning.current = true;
+              panStart.current = {
+                x: event.clientX,
+                y: event.clientY,
+                vx: viewport.x,
+                vy: viewport.y,
+              };
+              return;
+            }
+
             if (selectedStrokeIds.size > 0 && inkTool === "lasso") {
               dragSelection.current = world;
               canvasRef.current?.setPointerCapture(event.pointerId);
               return;
             }
-
-            if (shouldRejectPointer(event, pencilOnly)) return;
 
             if (inkTool === "lasso") {
               drawing.current = true;
@@ -325,8 +458,9 @@ export function InfiniteCanvas({
 
             if (inkTool === "eraser") {
               drawing.current = true;
-              const point = { ...world, pressure: 0.5 };
-              const radius = strokeWidth(lineWidth, 0.5, "eraser");
+              const pressure = normalizePressure(event.pressure, event.pointerType);
+              const point = { ...world, pressure };
+              const radius = strokeWidth(lineWidth, pressure, "eraser");
               patch({ strokes: eraseAtPoint(strokes, world.x, world.y, radius) });
               currentStroke.current = {
                 color: "#000",
@@ -336,11 +470,12 @@ export function InfiniteCanvas({
               };
             } else if (inkTool === "pen" || inkTool === "highlighter") {
               drawing.current = true;
+              const pressure = normalizePressure(event.pressure, event.pointerType);
               currentStroke.current = {
                 id: `stroke-${Date.now()}`,
                 color: strokeColor(color, inkTool),
                 width: lineWidth,
-                points: [{ ...world, pressure: 0.5 }],
+                points: [{ ...world, pressure }],
                 tool: inkTool,
                 opacity: strokeOpacity(inkTool),
               };
@@ -360,6 +495,24 @@ export function InfiniteCanvas({
                   y: panStart.current.vy + dy,
                 },
               });
+              return;
+            }
+
+            // Second finger arrived mid-stroke — switch to pan.
+            if (
+              event.pointerType === "touch" &&
+              activeTouches.current.size > 1 &&
+              drawing.current
+            ) {
+              abortInProgressStroke();
+              multiTouchPan.current = true;
+              panning.current = true;
+              panStart.current = {
+                x: event.clientX,
+                y: event.clientY,
+                vx: viewport.x,
+                vy: viewport.y,
+              };
               return;
             }
 
@@ -395,27 +548,43 @@ export function InfiniteCanvas({
             }
 
             if (inkTool === "eraser") {
-              const radius = strokeWidth(lineWidth, 0.5, "eraser");
+              const pressure = normalizePressure(event.pressure, event.pointerType);
+              const radius = strokeWidth(lineWidth, pressure, "eraser");
               patch({ strokes: eraseAtPoint(strokes, world.x, world.y, radius) });
-              currentStroke.current?.points.push({ ...world, pressure: 0.5 });
+              currentStroke.current?.points.push({ ...world, pressure });
               redraw();
               return;
             }
 
             if (currentStroke.current) {
-              currentStroke.current.points.push({ ...world, pressure: 0.5 });
+              const pressure = normalizePressure(event.pressure, event.pointerType);
+              currentStroke.current.points.push({ ...world, pressure });
               redraw();
             }
           }}
           onPointerUp={(event) => {
+            if (event.pointerType === "touch") {
+              activeTouches.current.delete(event.pointerId);
+            }
             if (canvasRef.current?.hasPointerCapture(event.pointerId)) {
               canvasRef.current.releasePointerCapture(event.pointerId);
+            }
+            if (multiTouchPan.current) {
+              if (activeTouches.current.size === 0) {
+                multiTouchPan.current = false;
+                panning.current = false;
+              }
+              return;
             }
             panning.current = false;
             dragSelection.current = null;
             finishStroke();
           }}
-          onPointerCancel={() => {
+          onPointerCancel={(event) => {
+            if (event.pointerType === "touch") {
+              activeTouches.current.delete(event.pointerId);
+            }
+            multiTouchPan.current = false;
             panning.current = false;
             dragSelection.current = null;
             finishStroke();

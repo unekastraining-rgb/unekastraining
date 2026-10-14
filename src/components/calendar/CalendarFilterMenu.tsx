@@ -22,12 +22,13 @@ export function CalendarFilterMenu({
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (!open) return;
     function onClickOutside(event: PointerEvent) {
       if (!ref.current?.contains(event.target as Node)) setOpen(false);
     }
-    document.addEventListener("pointerdown", onClickOutside);
-    return () => document.removeEventListener("pointerdown", onClickOutside);
-  }, []);
+    document.addEventListener("click", onClickOutside);
+    return () => document.removeEventListener("click", onClickOutside);
+  }, [open]);
 
   const activeCount =
     (filters.datePreset !== "all" ? 1 : 0) +

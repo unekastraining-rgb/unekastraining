@@ -47,6 +47,24 @@ export function AssignmentsTab({
             Everything due across your classes — add tasks, check them off, and
             filter by course.
           </p>
+          <p className="mt-2 text-sm">
+            <Link
+              href="/study/learner-model"
+              data-entry-kind="content-management"
+              className="font-semibold text-teal-800 hover:underline"
+            >
+              View Learner Growth Center
+            </Link>
+            <span className="text-stone-400"> · </span>
+            <Link
+              href="/study/activities/coding"
+              data-entry-kind="direct-activity"
+              data-assignments-practice-activities
+              className="font-semibold text-teal-800 hover:underline"
+            >
+              Practice activities
+            </Link>
+          </p>
         </div>
         <Link
           href="/dashboard"

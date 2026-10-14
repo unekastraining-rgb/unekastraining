@@ -7,9 +7,11 @@ import type { ConceptEntry } from "@/lib/core/note-types";
 export function ConceptDefinitionEditor({
   items,
   onChange,
+  bare = false,
 }: {
   items: ConceptEntry[];
   onChange: (items: ConceptEntry[]) => void;
+  bare?: boolean;
 }) {
   const update = (index: number, field: keyof ConceptEntry, value: string) => {
     onChange(items.map((item, i) => (i === index ? { ...item, [field]: value } : item)));
@@ -23,6 +25,46 @@ export function ConceptDefinitionEditor({
     if (items.length <= 1) return;
     onChange(items.filter((_, i) => i !== index));
   };
+
+  if (bare) {
+    return (
+      <div className="space-y-2 px-0.5 py-0.5">
+        {items.map((item, index) => (
+          <div key={index} className="group relative space-y-0.5">
+            <input
+              value={item.term}
+              onChange={(e) => update(index, "term", e.target.value)}
+              placeholder="Term"
+              className="w-full bg-transparent text-sm font-semibold text-stone-900 outline-none placeholder:text-stone-300"
+            />
+            <textarea
+              value={item.definition}
+              onChange={(e) => update(index, "definition", e.target.value)}
+              placeholder="Definition"
+              rows={2}
+              className="w-full min-w-0 resize-none bg-transparent text-sm leading-relaxed text-stone-700 outline-none placeholder:text-stone-300 [overflow-wrap:anywhere]"
+            />
+            {items.length > 1 ? (
+              <button
+                type="button"
+                onClick={() => removeItem(index)}
+                className="absolute -right-1 top-0 hidden rounded p-0.5 text-stone-300 hover:text-rose-500 group-hover:block"
+              >
+                <Trash2 className="h-3 w-3" />
+              </button>
+            ) : null}
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={addItem}
+          className="inline-flex items-center gap-1 text-[10px] font-semibold text-stone-400 hover:text-teal-700"
+        >
+          <Plus className="h-3 w-3" /> Add concept
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4 p-4">

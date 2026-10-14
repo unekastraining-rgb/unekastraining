@@ -2,33 +2,39 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
-  BookOpen,
   Calendar,
+  ChevronDown,
   ClipboardList,
   FileText,
   Layers,
-  MapPin,
   MessageCircle,
   Sparkles,
 } from "lucide-react";
 
 import { CourseProgressStory } from "@/components/courses/CourseProgressStory";
-import { CourseDashboard } from "@/components/courses/CourseDashboard";
+import {
+  CourseDashboard,
+  CourseThisWeek,
+} from "@/components/courses/CourseDashboard";
+import { CourseContentModal } from "@/components/courses/CourseContentModal";
 import { CourseInfoView } from "@/components/courses/CourseInfoView";
+import { AddCourseMaterialButton } from "@/components/materials/AddCourseMaterialModal";
 import { MaterialOpenActions } from "@/components/materials/MaterialOpenActions";
 import { BreakDownButton } from "@/components/study/BreakDownButton";
-import { StudyTopicToolkit } from "@/components/courses/StudyTopicToolkit";
+import { ContinueLearningButton } from "@/components/study/ContinueLearningButton";
 import { ClassMeetingsModal } from "@/components/hub/ClassMeetingsModal";
 import type { HubCourse, HubMeeting } from "@/components/hub/types";
 import { MasteryTree } from "@/components/csl/MasteryTree";
 import { isAssignmentCompleted } from "@/lib/academic";
+import { isMetaSyllabusTopic } from "@/lib/csl/six-worked-lesson";
 import { courseGradeSummary, formatGradeLabel } from "@/lib/grades";
 import { hubAssignmentFocusHref, hubChatHref, hubScheduleHref } from "@/lib/hub/tabs";
+import { pickColdStartTopic } from "@/lib/study/cold-start-topic";
+import { coreStudyPackHref } from "@/lib/study/loop-hrefs";
 import type { StudyTopicProfile } from "@/lib/study-topic/types";
-
-const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+import type { AddedCourseMaterial } from "@/components/materials/AddCourseMaterialModal";
 
 interface CourseDetail {
   id: string;
@@ -53,6 +59,9 @@ interface CourseDetail {
     kind: string;
     grade: number | null;
     maxGrade: number | null;
+    /** Soft Topic→Concept link when available — never invented mastery. */
+    conceptId?: string | null;
+    alignmentState?: "confirmed" | "inferred" | "unaligned";
   }>;
   materials: Array<{
     id: string;
@@ -82,16 +91,6 @@ function formatDueDate(value: string | null) {
     weekday: "short",
     month: "short",
     day: "numeric",
-  });
-}
-
-function formatTime(time: string) {
-  const [hours, minutes] = time.split(":").map(Number);
-  const date = new Date();
-  date.setHours(hours, minutes, 0, 0);
-  return date.toLocaleTimeString(undefined, {
-    hour: "numeric",
-    minute: "2-digit",
   });
 }
 
@@ -127,6 +126,11 @@ function statusClasses(status: string) {
   }
 }
 
+function isQuizOrTestKind(kind: string, title: string) {
+  if (kind === "QUIZ" || kind === "TEST") return true;
+  return /\b(quiz|test|exam|midterm|final)\b/i.test(title);
+}
+
 export function CourseDetailView({
   course,
   studyTopic = null,
@@ -137,10 +141,16 @@ export function CourseDetailView({
   const router = useRouter();
   const searchParams = useSearchParams();
   const [scheduleOpen, setScheduleOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<"overview" | "course-info">("overview");
+  const [syllabusOpen, setSyllabusOpen] = useState(false);
   const [courseInfoJson, setCourseInfoJson] = useState(course.courseInfoJson);
 
+  const coldStartTopic = useMemo(
+    () => pickColdStartTopic(course.topics.map((topic) => topic.name)),
+    [course.topics],
+  );
+
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync UI state to props or external subscription
     setCourseInfoJson(course.courseInfoJson);
   }, [course.courseInfoJson]);
 
@@ -168,9 +178,20 @@ export function CourseDetailView({
   useEffect(() => {
     const tab = searchParams.get("tab");
     if (tab === "course-info" || tab === "overview") {
-      setActiveTab(tab);
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync UI state to props or external subscription
+      setSyllabusOpen(true);
     }
   }, [searchParams]);
+
+  const openMaterialUpload = searchParams.get("upload") === "1";
+
+  const topicNames = useMemo(
+    () =>
+      course.topics
+        .map((topic) => topic.name)
+        .filter((name) => !isMetaSyllabusTopic(name)),
+    [course.topics],
+  );
 
   const hubCourse: HubCourse = {
     id: course.id,
@@ -196,7 +217,13 @@ export function CourseDetailView({
     title: meeting.title,
   }));
 
-  const pendingAssignments = course.assignments.filter(
+  const workAssignments = course.assignments.filter(
+    (assignment) => !isQuizOrTestKind(assignment.kind, assignment.title),
+  );
+  const quizAssessments = course.assignments.filter((assignment) =>
+    isQuizOrTestKind(assignment.kind, assignment.title),
+  );
+  const pendingAssignments = workAssignments.filter(
     (assignment) =>
       !isAssignmentCompleted(
         assignment.status as "NOT_STARTED" | "IN_PROGRESS" | "SUBMITTED" | "GRADED",
@@ -252,7 +279,10 @@ export function CourseDetailView({
                 Class schedule
               </button>
               <Link
-                href={hubChatHref({ courseId: course.id })}
+                href={hubChatHref({
+                  courseId: course.id,
+                  topic: coldStartTopic ?? undefined,
+                })}
                 className="inline-flex items-center gap-2 rounded-xl border border-orange-200 px-4 py-2.5 text-sm font-semibold text-stone-700 transition hover:bg-orange-50"
               >
                 <MessageCircle className="h-4 w-4" />
@@ -295,53 +325,29 @@ export function CourseDetailView({
           instructor={course.instructor}
           meetings={course.meetings}
           accentColor={course.color}
+          focusTopic={coldStartTopic}
           onViewFullSyllabus={
             course.moodleCourseId || courseInfoJson
-              ? () => setActiveTab("course-info")
+              ? () => setSyllabusOpen(true)
               : undefined
           }
         />
 
-        <div className="flex gap-2 border-b border-orange-100">
-          <button
-            type="button"
-            onClick={() => setActiveTab("overview")}
-            className={`rounded-t-xl px-4 py-2.5 text-sm font-semibold transition ${
-              activeTab === "overview"
-                ? "bg-white text-stone-900 shadow-sm"
-                : "text-stone-500 hover:text-stone-800"
-            }`}
-          >
-            Dashboard
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("course-info")}
-            className={`rounded-t-xl px-4 py-2.5 text-sm font-semibold transition ${
-              activeTab === "course-info"
-                ? "bg-white text-stone-900 shadow-sm"
-                : "text-stone-500 hover:text-stone-800"
-            }`}
-          >
-            Full syllabus & details
-          </button>
-        </div>
+        <CourseThisWeek
+          courseId={course.id}
+          courseInfoJson={courseInfoJson}
+          assignments={course.assignments}
+          instructor={course.instructor}
+          meetings={course.meetings}
+          focusTopic={coldStartTopic}
+        />
 
-        {activeTab === "course-info" ? (
-          <CourseInfoView courseId={course.id} moodleCourseId={course.moodleCourseId} />
-        ) : (
-          <>
-        {studyTopic ? (
-          <StudyTopicToolkit courseId={course.id} studyTopic={studyTopic} />
-        ) : null}
-
-        <CourseProgressStory courseId={course.id} />
-
-        {!studyTopic ? (
+        {!studyTopic && topicNames.length === 0 ? (
           <section className="rounded-3xl border border-violet-100 bg-white p-6 shadow-sm">
             <h2 className="text-lg font-bold text-stone-900">Break this down</h2>
             <p className="mt-1 text-sm text-stone-600">
-              One button — outline, flashcards, quiz, and suggested calendar blocks.
+              No study topics yet. Use this once to draft an outline, flashcards, and a quiz from
+              what the syllabus already knows — then refine in Study.
             </p>
             <div className="mt-4">
               <BreakDownButton courseId={course.id} />
@@ -349,154 +355,119 @@ export function CourseDetailView({
           </section>
         ) : null}
 
-        <div className="grid gap-8 lg:grid-cols-[1.1fr_0.9fr]">
-          <section className="rounded-3xl border border-orange-100 bg-white p-6 shadow-sm">
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-bold text-stone-900">Assignments</h2>
-                <p className="text-sm text-stone-500">
-                  {pendingAssignments.length} still open
-                </p>
-              </div>
+        <div className="grid gap-6 lg:grid-cols-2">
+          <CollapsibleSection
+            title="Assignments"
+            hint={`${pendingAssignments.length} still open · no quizzes/tests`}
+            count={workAssignments.length}
+            defaultOpen
+            empty="No homework-style assignments yet."
+            headerRight={
               <Link
                 href={hubScheduleHref()}
                 className="text-sm font-semibold text-orange-600 hover:text-orange-700"
+                onClick={(e) => e.stopPropagation()}
               >
-                All assignments
+                All
               </Link>
-            </div>
+            }
+          >
+            <ul className="space-y-2">
+              {workAssignments.map((assignment) => (
+                <AssignmentRow key={assignment.id} assignment={assignment} />
+              ))}
+            </ul>
+          </CollapsibleSection>
 
-            {course.assignments.length === 0 ? (
-              <p className="rounded-2xl border border-dashed border-orange-200 px-4 py-8 text-center text-sm text-stone-500">
-                No assignments yet. Add one from the planner or upload a syllabus.
-              </p>
-            ) : (
-              <ul className="space-y-2">
-                {course.assignments.map((assignment) => {
-                  const gradeLabel = formatGradeLabel(assignment);
-                  return (
-                    <li key={assignment.id}>
-                      <Link
-                        href={hubAssignmentFocusHref(assignment.id)}
-                        className="flex items-start justify-between gap-3 rounded-2xl border border-orange-100 px-4 py-3 transition hover:border-orange-200 hover:bg-orange-50/50"
-                      >
-                        <div className="min-w-0">
-                          <p className="font-semibold text-stone-900">{assignment.title}</p>
-                          <p className="mt-0.5 text-xs text-stone-500">
-                            Due {formatDueDate(assignment.dueDate)}
-                          </p>
-                        </div>
-                        <div className="flex shrink-0 flex-col items-end gap-1.5">
-                          {gradeLabel ? (
-                            <span className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[10px] font-bold text-violet-800">
-                              {gradeLabel}
-                            </span>
-                          ) : null}
-                          <span
-                            className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${statusClasses(assignment.status)}`}
-                          >
-                            {statusLabel(assignment.status)}
-                          </span>
-                        </div>
-                      </Link>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </section>
+          <CollapsibleSection
+            title="Quizzes & assessments"
+            hint="Quizzes, tests, exams only"
+            count={quizAssessments.length}
+            defaultOpen={false}
+            empty="No quizzes or tests synced yet."
+            tone="violet"
+          >
+            <ul className="space-y-2">
+              {quizAssessments.map((assignment) => (
+                <AssignmentRow key={assignment.id} assignment={assignment} tone="violet" />
+              ))}
+            </ul>
+          </CollapsibleSection>
 
-          <div className="space-y-8">
-            <section className="rounded-3xl border border-orange-100 bg-white p-6 shadow-sm">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-lg font-bold text-stone-900">Materials</h2>
-                  <p className="text-sm text-stone-500">Quick view or open a Core workbook</p>
-                </div>
-                <BookOpen className="h-5 w-5 text-stone-400" />
+          <CollapsibleSection
+            title="Materials"
+            hint="Files you uploaded or open in Core"
+            count={course.materials.length}
+            defaultOpen={false}
+            empty="No materials yet. Add a chapter, syllabus, slides, or paste text."
+            headerRight={
+              <span onClick={(e) => e.stopPropagation()}>
+                <AddCourseMaterialButton
+                  courseId={course.id}
+                  courses={[{ id: course.id, title: course.title }]}
+                  compact
+                  defaultOpen={openMaterialUpload}
+                  onAdded={(material: AddedCourseMaterial) => {
+                    router.refresh();
+                    if ((material.topicsCreated ?? 0) > 0) {
+                      const href = new URL(
+                        coreStudyPackHref(course.id, material.title),
+                        "http://local",
+                      );
+                      if (material.id) href.searchParams.set("materialId", material.id);
+                      router.push(`${href.pathname}${href.search}`);
+                    }
+                  }}
+                />
+              </span>
+            }
+          >
+            <ul className="space-y-2">
+              {course.materials.map((material) => (
+                <li key={material.id}>
+                  <MaterialOpenActions
+                    materialId={material.id}
+                    courseId={course.id}
+                    title={material.title}
+                    type={material.type}
+                  />
+                </li>
+              ))}
+            </ul>
+          </CollapsibleSection>
+
+          <CollapsibleSection
+            title="Progress & study map"
+            hint="Study activity — not official proficiency"
+            count={course.topics.length}
+            defaultOpen={false}
+            empty="No topics yet to map."
+            className="lg:col-span-2"
+            alwaysShowChildren
+          >
+            <CourseProgressStory courseId={course.id} />
+            {course.topics.length > 0 ? (
+              <div className="mt-6 border-t border-teal-50 pt-6">
+                <MasteryTree courseId={course.id} />
               </div>
-
-              {course.materials.length === 0 ? (
-                <p className="rounded-2xl border border-dashed border-orange-200 px-4 py-8 text-center text-sm text-stone-500">
-                  No materials yet. Upload a syllabus or add files in Core.
-                </p>
-              ) : (
-                <ul className="space-y-2">
-                  {course.materials.map((material) => (
-                    <li key={material.id}>
-                      <MaterialOpenActions
-                        materialId={material.id}
-                        courseId={course.id}
-                        title={material.title}
-                        type={material.type}
-                      />
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-
-            <section className="rounded-3xl border border-orange-100 bg-white p-6 shadow-sm">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-lg font-bold text-stone-900">Weekly schedule</h2>
-                  <p className="text-sm text-stone-500">
-                    {course.meetings.length === 0
-                      ? "No class times set"
-                      : `${course.meetings.length} meeting${course.meetings.length === 1 ? "" : "s"} per week`}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setScheduleOpen(true)}
-                  className="text-sm font-semibold text-orange-600 hover:text-orange-700"
-                >
-                  Edit
-                </button>
-              </div>
-
-              {course.meetings.length === 0 ? (
-                <button
-                  type="button"
-                  onClick={() => setScheduleOpen(true)}
-                  className="w-full rounded-2xl border border-dashed border-orange-200 px-4 py-8 text-center text-sm font-semibold text-orange-600 transition hover:bg-orange-50"
-                >
-                  Add class meeting times
-                </button>
-              ) : (
-                <ul className="space-y-2">
-                  {course.meetings.map((meeting) => (
-                    <li
-                      key={meeting.id}
-                      className="rounded-2xl border border-orange-100 px-4 py-3"
-                    >
-                      <p className="font-semibold text-stone-900">
-                        {DAY_LABELS[meeting.dayOfWeek] ?? "Day"}{" "}
-                        {formatTime(meeting.startTime)} – {formatTime(meeting.endTime)}
-                      </p>
-                      {meeting.title ? (
-                        <p className="mt-0.5 text-sm text-stone-600">{meeting.title}</p>
-                      ) : null}
-                      {meeting.location ? (
-                        <p className="mt-1 flex items-center gap-1 text-xs text-stone-500">
-                          <MapPin className="h-3 w-3" />
-                          {meeting.location}
-                        </p>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          </div>
+            ) : null}
+          </CollapsibleSection>
         </div>
-
-        {course.topics.length > 0 ? (
-          <MasteryTree courseId={course.id} />
-        ) : null}
-          </>
-        )}
       </div>
+
+      {syllabusOpen ? (
+        <CourseContentModal
+          title="Full syllabus & details"
+          onClose={() => setSyllabusOpen(false)}
+        >
+          <div className="whitespace-normal -m-1">
+            <CourseInfoView
+              courseId={course.id}
+              moodleCourseId={course.moodleCourseId}
+            />
+          </div>
+        </CourseContentModal>
+      ) : null}
 
       {scheduleOpen ? (
         <ClassMeetingsModal
@@ -508,5 +479,127 @@ export function CourseDetailView({
         />
       ) : null}
     </div>
+  );
+}
+
+function AssignmentRow({
+  assignment,
+  tone = "orange",
+}: {
+  assignment: CourseDetail["assignments"][number];
+  tone?: "orange" | "violet";
+}) {
+  const gradeLabel = formatGradeLabel(assignment);
+  const border =
+    tone === "violet"
+      ? "border-violet-100 hover:border-violet-200 hover:bg-violet-50/50"
+      : "border-orange-100 hover:border-orange-200 hover:bg-orange-50/50";
+  const conceptId =
+    typeof assignment.conceptId === "string" && assignment.conceptId.trim()
+      ? assignment.conceptId.trim()
+      : null;
+  return (
+    <li
+      className={`flex items-start justify-between gap-3 rounded-2xl border px-4 py-3 transition ${border}`}
+    >
+      <Link
+        href={hubAssignmentFocusHref(assignment.id)}
+        className="min-w-0 flex-1"
+      >
+        <p className="font-semibold text-stone-900">{assignment.title}</p>
+        <p className="mt-0.5 text-xs text-stone-500">
+          Due {formatDueDate(assignment.dueDate)}
+          {assignment.alignmentState &&
+          assignment.alignmentState !== "unaligned"
+            ? ` · ${assignment.alignmentState} concept link`
+            : ""}
+        </p>
+      </Link>
+      <div className="flex shrink-0 flex-col items-end gap-1.5">
+        {gradeLabel ? (
+          <span className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[10px] font-bold text-violet-800">
+            {gradeLabel}
+          </span>
+        ) : null}
+        <span
+          className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${statusClasses(assignment.status)}`}
+        >
+          {statusLabel(assignment.status)}
+        </span>
+        {/* 2P-49 — launch ULE when soft concept link exists; status ≠ mastery. */}
+        {conceptId ? (
+          <ContinueLearningButton
+            conceptId={conceptId}
+            assignmentId={assignment.id}
+            secondaryHint="Study this assignment"
+            className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl bg-teal-700 px-3 py-2 text-xs font-semibold text-white hover:bg-teal-800 disabled:opacity-60 touch-manipulation"
+          />
+        ) : null}
+      </div>
+    </li>
+  );
+}
+
+function CollapsibleSection({
+  title,
+  hint,
+  count,
+  defaultOpen = true,
+  empty,
+  children,
+  headerRight,
+  tone = "orange",
+  className = "",
+  alwaysShowChildren = false,
+}: {
+  title: string;
+  hint: string;
+  count: number;
+  defaultOpen?: boolean;
+  empty: string;
+  children: React.ReactNode;
+  headerRight?: React.ReactNode;
+  tone?: "orange" | "violet";
+  className?: string;
+  alwaysShowChildren?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const border = tone === "violet" ? "border-violet-100" : "border-orange-100";
+  const emptyBorder =
+    tone === "violet" ? "border-violet-200" : "border-orange-200";
+  return (
+    <section className={`rounded-3xl border ${border} bg-white p-6 shadow-sm ${className}`}>
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        className="flex w-full items-start justify-between gap-3 text-left touch-manipulation"
+      >
+        <div className="min-w-0">
+          <h2 className="text-lg font-bold text-stone-900">{title}</h2>
+          <p className="text-sm text-stone-500">{hint}</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {headerRight}
+          <span className="text-xs font-bold text-stone-400">{count}</span>
+          <ChevronDown
+            className={`h-5 w-5 text-stone-400 transition ${open ? "rotate-180" : ""}`}
+          />
+        </div>
+      </button>
+      {open ? (
+        <div className="mt-4">
+          {!alwaysShowChildren && count === 0 ? (
+            <p
+              className={`rounded-2xl border border-dashed ${emptyBorder} px-4 py-8 text-center text-sm text-stone-500`}
+            >
+              {empty}
+            </p>
+          ) : (
+            children
+          )}
+        </div>
+      ) : null}
+    </section>
   );
 }

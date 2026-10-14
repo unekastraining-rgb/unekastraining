@@ -1,3 +1,5 @@
+import { logOpsEvent } from "@/lib/ops/safe-log";
+
 import {
   AIProviderChainExhaustedError,
   getAIErrorMessage,
@@ -24,9 +26,19 @@ export class FallbackAIService implements AIServiceProvider {
     options?: AICompletionOptions,
   ): Promise<AICompletionResult> {
     const failures: Array<{ provider: string; message: string }> = [];
+    const skip = new Set(
+      (options?.skipProviders ?? []).map((name) => name.toLowerCase()),
+    );
 
     for (let index = 0; index < this.providers.length; index += 1) {
       const provider = this.providers[index]!;
+      if (skip.has(provider.name.toLowerCase())) {
+        failures.push({
+          provider: provider.name,
+          message: "skipped for quality retry",
+        });
+        continue;
+      }
       try {
         const result = await provider.complete(messages, options);
         return {
@@ -36,7 +48,9 @@ export class FallbackAIService implements AIServiceProvider {
       } catch (error) {
         const message = getAIErrorMessage(error);
         failures.push({ provider: provider.name, message });
-        const hasNext = index < this.providers.length - 1;
+        const hasNext = this.providers
+          .slice(index + 1)
+          .some((item) => !skip.has(item.name.toLowerCase()));
 
         if (!hasNext || !shouldTryNextProvider(error)) {
           if (hasNext && !shouldTryNextProvider(error)) {
@@ -45,12 +59,18 @@ export class FallbackAIService implements AIServiceProvider {
           break;
         }
 
+        const next = this.providers
+          .slice(index + 1)
+          .find((item) => !skip.has(item.name.toLowerCase()));
         console.warn(
-          `[ai] ${provider.name} unavailable (${message}). Trying ${this.providers[index + 1]!.name}…`,
+          `[ai] ${provider.name} unavailable (${message}). Trying ${next?.name ?? "next"}…`,
         );
       }
     }
 
+    logOpsEvent("ai.provider.failure", {
+      providersTried: failures.length,
+    });
     throw new AIProviderChainExhaustedError(failures);
   }
 }

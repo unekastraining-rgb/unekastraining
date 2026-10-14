@@ -18,7 +18,16 @@ const COOKIE_NAME = SESSION_COOKIE_NAME;
 const SESSION_DAYS = 30;
 
 function getSecret() {
-  return process.env.SESSION_SECRET ?? "dev-insecure-session-secret-change-me";
+  const secret = process.env.SESSION_SECRET?.trim();
+  if (process.env.NODE_ENV === "production") {
+    if (!secret || secret === "dev-insecure-session-secret-change-me") {
+      throw new Error(
+        "SESSION_SECRET must be set to a strong secret in production.",
+      );
+    }
+    return secret;
+  }
+  return secret || "dev-insecure-session-secret-change-me";
 }
 
 function sign(value: string) {

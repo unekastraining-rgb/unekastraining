@@ -2,6 +2,12 @@ import { CalendarEventType } from "@/generated/prisma";
 import { getAppOrigin } from "@/lib/lms/oauth";
 import { parseRecurrenceRule, toRrule } from "@/lib/calendar/recurrence";
 import { getUserCalendarSettings } from "@/lib/calendar/settings";
+import { openLmsToken, sealLmsToken } from "@/lib/security/lms-token-crypto";
+
+/** Open sealed or legacy plaintext CalendarConnection tokens (same seal as LMS). */
+function resolveCalendarToken(stored: string | null | undefined): string | null {
+  return openLmsToken(stored);
+}
 
 export function getGoogleCalendarCallbackUrl() {
   return `${getAppOrigin()}/api/calendar/google/oauth/callback`;
@@ -198,14 +204,18 @@ export async function syncGoogleCalendarConnection(
     throw new Error("Google Calendar is not connected.");
   }
 
-  let accessToken = connection.accessToken;
-  if (connection.refreshToken) {
+  let accessToken = resolveCalendarToken(connection.accessToken);
+  if (!accessToken) {
+    throw new Error("Google Calendar is not connected.");
+  }
+  const refreshToken = resolveCalendarToken(connection.refreshToken);
+  if (refreshToken) {
     try {
-      const refreshed = await refreshGoogleCalendarToken(connection.refreshToken);
+      const refreshed = await refreshGoogleCalendarToken(refreshToken);
       accessToken = refreshed.access_token;
       await db.calendarConnection.update({
         where: { id: connection.id },
-        data: { accessToken },
+        data: { accessToken: sealLmsToken(accessToken) },
       });
     } catch {
       // Use existing token if refresh fails
@@ -290,14 +300,16 @@ export async function getGoogleAccessTokenForUser(userId: string): Promise<{
 
   if (!connection?.accessToken) return null;
 
-  let accessToken = connection.accessToken;
-  if (connection.refreshToken) {
+  let accessToken = resolveCalendarToken(connection.accessToken);
+  if (!accessToken) return null;
+  const refreshToken = resolveCalendarToken(connection.refreshToken);
+  if (refreshToken) {
     try {
-      const refreshed = await refreshGoogleCalendarToken(connection.refreshToken);
+      const refreshed = await refreshGoogleCalendarToken(refreshToken);
       accessToken = refreshed.access_token;
       await db.calendarConnection.updateMany({
         where: { userId, provider: "google" },
-        data: { accessToken },
+        data: { accessToken: sealLmsToken(accessToken) },
       });
     } catch {
       // Use existing token if refresh fails
@@ -306,7 +318,7 @@ export async function getGoogleAccessTokenForUser(userId: string): Promise<{
 
   return {
     accessToken,
-    refreshToken: connection.refreshToken,
+    refreshToken,
     connectionId: connection.id,
   };
 }
@@ -318,6 +330,8 @@ export async function discoverGoogleCalendarsForUser(
 ) {
   const { db } = await import("@/lib/db");
   const calendars = await listGoogleCalendars(accessToken);
+  const sealedAccess = sealLmsToken(accessToken);
+  const sealedRefresh = sealLmsToken(refreshToken);
 
   for (const calendar of calendars) {
     const existing = await db.calendarConnection.findFirst({
@@ -342,15 +356,15 @@ export async function discoverGoogleCalendarsForUser(
         externalCalendarId: calendar.id,
         calendarName: calendar.summary ?? "Google Calendar",
         color: calendar.backgroundColor ?? "#4285f4",
-        accessToken,
-        refreshToken,
+        accessToken: sealedAccess,
+        refreshToken: sealedRefresh,
         status: calendar.primary ? "connected" : "available",
       },
       update: {
         calendarName: calendar.summary ?? "Google Calendar",
         color: calendar.backgroundColor ?? existing?.color ?? "#4285f4",
-        accessToken,
-        refreshToken: refreshToken ?? undefined,
+        accessToken: sealedAccess,
+        refreshToken: sealedRefresh ?? undefined,
         status: existing?.status ?? (calendar.primary ? "connected" : "available"),
       },
     });
@@ -519,14 +533,18 @@ async function getGoogleConnectionAccessToken(
     throw new Error("Google Calendar is not connected.");
   }
 
-  let accessToken = connection.accessToken;
-  if (connection.refreshToken) {
+  let accessToken = resolveCalendarToken(connection.accessToken);
+  if (!accessToken) {
+    throw new Error("Google Calendar is not connected.");
+  }
+  const refreshToken = resolveCalendarToken(connection.refreshToken);
+  if (refreshToken) {
     try {
-      const refreshed = await refreshGoogleCalendarToken(connection.refreshToken);
+      const refreshed = await refreshGoogleCalendarToken(refreshToken);
       accessToken = refreshed.access_token;
       await db.calendarConnection.update({
         where: { id: connection.id },
-        data: { accessToken },
+        data: { accessToken: sealLmsToken(accessToken) },
       });
     } catch {
       // Use existing token if refresh fails

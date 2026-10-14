@@ -24,7 +24,7 @@ export const hubTabs: {
   },
   {
     id: "classes",
-    label: "Classes",
+    label: "My Courses",
     description: "Your courses",
     icon: GraduationCap,
     mobile: true,

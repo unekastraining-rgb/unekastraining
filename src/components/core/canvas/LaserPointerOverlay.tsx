@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-type TrailPoint = { x: number; y: number; born: number };
+type TrailPoint = { x: number; y: number; born: number; opacity: number; size: number };
 
 export function LaserPointerOverlay({
   active,
@@ -17,6 +17,7 @@ export function LaserPointerOverlay({
 
   useEffect(() => {
     if (!active) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync UI state to props or external subscription
       setCursor(null);
       setTrail([]);
       return;
@@ -29,7 +30,17 @@ export function LaserPointerOverlay({
       }
       const point = { x: event.clientX, y: event.clientY };
       setCursor(point);
-      setTrail((current) => [...current.slice(-18), { ...point, born: Date.now() }]);
+      setTrail((current) => {
+        const born = Date.now();
+        const next = [...current.slice(-18), { ...point, born, opacity: 1, size: 16 }];
+        return next.map((trailPoint, index, arr) => ({
+          ...trailPoint,
+          opacity:
+            Math.max(0, 1 - (born - trailPoint.born) / 700) *
+            (0.15 + index / Math.max(arr.length, 1) / 4),
+          size: 6 + (index / Math.max(arr.length, 1)) * 10,
+        }));
+      });
     }
 
     window.addEventListener("pointermove", onMove, { passive: true });
@@ -40,8 +51,19 @@ export function LaserPointerOverlay({
     if (!active) return;
 
     function tick() {
-      const cutoff = Date.now() - 700;
-      setTrail((current) => current.filter((point) => point.born >= cutoff));
+      const now = Date.now();
+      const cutoff = now - 700;
+      setTrail((current) =>
+        current
+          .filter((point) => point.born >= cutoff)
+          .map((point, index, arr) => ({
+            ...point,
+            opacity:
+              Math.max(0, 1 - (now - point.born) / 700) *
+              (0.15 + index / Math.max(arr.length, 1) / 4),
+            size: 6 + (index / Math.max(arr.length, 1)) * 10,
+          })),
+      );
       frameRef.current = window.requestAnimationFrame(tick);
     }
 
@@ -55,27 +77,22 @@ export function LaserPointerOverlay({
 
   return (
     <div className="pointer-events-none fixed inset-0 z-[80]">
-      {trail.map((point, index) => {
-        const age = Date.now() - point.born;
-        const opacity = Math.max(0, 1 - age / 700) * (0.15 + index / trail.length / 4);
-        const size = 6 + (index / Math.max(trail.length, 1)) * 10;
-        return (
+      {trail.map((point, index) => (
           <span
             key={`${point.born}-${index}`}
             className="absolute rounded-full"
             style={{
               left: point.x,
               top: point.y,
-              width: size,
-              height: size,
+              width: point.size,
+              height: point.size,
               transform: "translate(-50%, -50%)",
               backgroundColor: color,
-              opacity,
+              opacity: point.opacity,
               boxShadow: `0 0 12px ${color}`,
             }}
           />
-        );
-      })}
+        ))}
       <span
         className="absolute rounded-full"
         style={{

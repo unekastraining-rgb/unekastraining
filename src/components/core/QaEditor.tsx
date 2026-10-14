@@ -10,9 +10,11 @@ export { emptyQa };
 export function QaEditor({
   data,
   onChange,
+  bare = false,
 }: {
   data: QaData;
   onChange: (data: QaData) => void;
+  bare?: boolean;
 }) {
   const updatePair = (index: number, field: "question" | "answer", value: string) => {
     onChange({
@@ -30,6 +32,46 @@ export function QaEditor({
     if (data.pairs.length <= 1) return;
     onChange({ pairs: data.pairs.filter((_, pairIndex) => pairIndex !== index) });
   };
+
+  if (bare) {
+    return (
+      <div className="space-y-2 px-0.5 py-0.5">
+        {data.pairs.map((pair, index) => (
+          <div key={index} className="group relative space-y-0.5">
+            <input
+              value={pair.question}
+              onChange={(event) => updatePair(index, "question", event.target.value)}
+              placeholder="Question"
+              className="w-full bg-transparent text-sm font-semibold text-stone-900 outline-none placeholder:text-stone-300"
+            />
+            <textarea
+              value={pair.answer}
+              onChange={(event) => updatePair(index, "answer", event.target.value)}
+              placeholder="Answer"
+              rows={2}
+              className="w-full resize-none bg-transparent text-sm leading-relaxed text-stone-700 outline-none placeholder:text-stone-300"
+            />
+            {data.pairs.length > 1 ? (
+              <button
+                type="button"
+                onClick={() => removePair(index)}
+                className="absolute -right-1 top-0 hidden rounded p-0.5 text-stone-300 hover:text-rose-500 group-hover:block"
+              >
+                <Trash2 className="h-3 w-3" />
+              </button>
+            ) : null}
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={addPair}
+          className="inline-flex items-center gap-1 text-[10px] font-semibold text-stone-400 hover:text-teal-700"
+        >
+          <Plus className="h-3 w-3" /> Add Q&A
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4 p-4">

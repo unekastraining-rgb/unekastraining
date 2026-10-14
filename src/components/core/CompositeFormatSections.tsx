@@ -28,17 +28,23 @@ import { MindMapEditor } from "@/components/core/MindMapEditor";
 import { FlowDiagramEditor } from "@/components/core/FlowDiagramEditor";
 import { ChartingEditor } from "@/components/core/ChartingEditor";
 import { QaEditor } from "@/components/core/QaEditor";
+import { RichTextEditor } from "@/components/core/RichTextEditor";
 
 export function FormatBlockEditor({
   section,
   doc,
   setDoc,
+  bare = false,
+  selected = false,
 }: {
   section: CompositeSection;
   doc: NoteDocument;
   setDoc: (updater: (current: NoteDocument) => NoteDocument) => void;
+  /** Canvas mode: no card chrome, fits quiet text-like blocks */
+  bare?: boolean;
+  selected?: boolean;
 }) {
-  return renderSection(section, doc, setDoc);
+  return renderSection(section, doc, setDoc, bare, selected);
 }
 
 /** @deprecated Use PageFormatBlocksLayer for freeform canvas pages */
@@ -102,6 +108,8 @@ function renderSection(
   section: CompositeSection,
   doc: NoteDocument,
   setDoc: (updater: (current: NoteDocument) => NoteDocument) => void,
+  bare = false,
+  selected = false,
 ) {
   const data = readSectionData(section, doc);
   const formatId = section.formatId;
@@ -110,6 +118,7 @@ function renderSection(
     case "PROGRESSIVE":
       return (
         <ProgressiveEditor
+          bare={bare}
           steps={(data.progressive as { steps: [] })?.steps ?? []}
           onChange={(steps) => updateSection(section, doc, setDoc, { progressive: { steps } })}
         />
@@ -117,6 +126,7 @@ function renderSection(
     case "PROBLEM_SOLUTION":
       return (
         <ProblemSolutionEditor
+          bare={bare}
           items={(data.problemSolution as { items: [] })?.items ?? []}
           onChange={(items) => updateSection(section, doc, setDoc, { problemSolution: { items } })}
         />
@@ -124,6 +134,7 @@ function renderSection(
     case "CONCEPT_DEFINITION":
       return (
         <ConceptDefinitionEditor
+          bare={bare}
           items={(data.concepts as { items: [] })?.items ?? []}
           onChange={(items) => updateSection(section, doc, setDoc, { concepts: { items } })}
         />
@@ -131,6 +142,7 @@ function renderSection(
     case "TIMELINE":
       return (
         <TimelineEditor
+          bare={bare}
           events={(data.timeline as { events: [] })?.events ?? []}
           onChange={(events) => updateSection(section, doc, setDoc, { timeline: { events } })}
         />
@@ -139,6 +151,7 @@ function renderSection(
     case "BOXING":
       return (
         <TwoColumnEditor
+          bare={bare}
           leftHeader={(data.twoColumn as { leftHeader?: string })?.leftHeader ?? "Idea"}
           rightHeader={(data.twoColumn as { rightHeader?: string })?.rightHeader ?? "Detail"}
           rows={
@@ -153,6 +166,7 @@ function renderSection(
     case "OUTLINE":
       return (
         <OutlineEditor
+          bare={bare}
           nodes={(data.outlineNodes as []) ?? []}
           onChange={(nodes) => updateSection(section, doc, setDoc, { outlineNodes: nodes })}
         />
@@ -160,6 +174,7 @@ function renderSection(
     case "MIND_MAP":
       return (
         <MindMapEditor
+          bare={bare}
           data={(data.mindMap as MindMapData) ?? { nodes: [], edges: [] }}
           onChange={(mindMap) => updateSection(section, doc, setDoc, { mindMap })}
         />
@@ -168,6 +183,7 @@ function renderSection(
     case "PROCESS_FLOW":
       return (
         <FlowDiagramEditor
+          bare={bare}
           data={(data.flow as { nodes: []; edges: [] }) ?? { nodes: [], edges: [] }}
           onChange={(flow) => updateSection(section, doc, setDoc, { flow })}
         />
@@ -176,6 +192,7 @@ function renderSection(
     case "COMPARISON_MATRIX":
       return (
         <ChartingEditor
+          bare={bare}
           data={(data.charting as ChartingData) ?? emptyCharting()}
           onChange={(charting) => updateSection(section, doc, setDoc, { charting })}
         />
@@ -183,6 +200,7 @@ function renderSection(
     case "QA":
       return (
         <QaEditor
+          bare={bare}
           data={(data.qa as QaData) ?? { pairs: [{ question: "", answer: "" }] }}
           onChange={(qa) => updateSection(section, doc, setDoc, { qa })}
         />
@@ -191,6 +209,7 @@ function renderSection(
     case "CORNELL_MIND":
       return (
         <CornellSection
+          bare={bare}
           formatId={formatId}
           cornell={(data.cornell as CornellContent) ?? { notes: "", cues: "", summary: "" }}
           mindMap={(data.mindMap as MindMapData) ?? { nodes: [], edges: [] }}
@@ -200,11 +219,17 @@ function renderSection(
       );
     default:
       return (
-        <textarea
-          value={(data.typed as string) ?? ""}
-          onChange={(e) => updateSection(section, doc, setDoc, { typed: e.target.value })}
+        <RichTextEditor
+          bare={bare}
+          id={`section-${section.id}-typed`}
+          text={(data.typed as string) ?? ""}
+          html={(data.typedHtml as string) ?? undefined}
           placeholder="Notes for this section…"
-          className="min-h-[10rem] w-full resize-none bg-transparent text-sm outline-none"
+          className={bare ? "min-h-[1.5rem] w-full min-w-0" : "min-h-[10rem] w-full"}
+          selected={selected}
+          onChange={({ text, html }) =>
+            updateSection(section, doc, setDoc, { typed: text, typedHtml: html })
+          }
         />
       );
   }
@@ -216,38 +241,61 @@ function CornellSection({
   mindMap,
   onCornellChange,
   onMindMapChange,
+  bare = false,
 }: {
   formatId: CoreFormatId;
   cornell: CornellContent;
   mindMap: MindMapData;
   onCornellChange: (cornell: CornellContent) => void;
   onMindMapChange: (mindMap: MindMapData) => void;
+  bare?: boolean;
 }) {
   return (
-    <div className="space-y-3">
-      <div className="grid min-h-[12rem] grid-cols-[1fr_12rem] grid-rows-[1fr_auto] gap-px bg-stone-100">
-        <textarea
-          value={cornell.notes}
-          onChange={(e) => onCornellChange({ ...cornell, notes: e.target.value })}
+    <div className="space-y-2">
+      <div
+        className={
+          bare
+            ? "grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,9rem)] grid-rows-[1fr_auto] gap-1"
+            : "grid min-h-[12rem] grid-cols-[1fr_12rem] grid-rows-[1fr_auto] gap-px bg-stone-100"
+        }
+      >
+        <RichTextEditor
+          bare={bare}
+          id="block-cornell-notes"
+          text={cornell.notes}
+          html={cornell.notesHtml}
           placeholder="Notes…"
-          className="min-h-[10rem] resize-none bg-white p-4 text-sm outline-none"
+          className={bare ? "min-h-[3rem] min-w-0" : "min-h-[10rem] bg-white"}
+          onChange={({ text, html }) =>
+            onCornellChange({ ...cornell, notes: text, notesHtml: html })
+          }
         />
-        <textarea
-          value={cornell.cues}
-          onChange={(e) => onCornellChange({ ...cornell, cues: e.target.value })}
+        <RichTextEditor
+          bare={bare}
+          id="block-cornell-cues"
+          text={cornell.cues}
+          html={cornell.cuesHtml}
           placeholder="Cues"
-          className="resize-none bg-orange-50/50 p-3 text-xs outline-none"
+          className={bare ? "min-w-0" : "bg-orange-50/50"}
+          style={{ fontSize: 12 }}
+          onChange={({ text, html }) =>
+            onCornellChange({ ...cornell, cues: text, cuesHtml: html })
+          }
         />
-        <textarea
-          value={cornell.summary}
-          onChange={(e) => onCornellChange({ ...cornell, summary: e.target.value })}
+        <RichTextEditor
+          bare={bare}
+          id="block-cornell-summary"
+          text={cornell.summary}
+          html={cornell.summaryHtml}
           placeholder="Summary"
-          className="col-span-2 resize-none bg-teal-50/40 p-3 text-sm outline-none"
-          rows={2}
+          className={bare ? "col-span-2 min-w-0" : "col-span-2 bg-teal-50/40"}
+          onChange={({ text, html }) =>
+            onCornellChange({ ...cornell, summary: text, summaryHtml: html })
+          }
         />
       </div>
       {formatId === "CORNELL_MIND" ? (
-        <MindMapEditor data={mindMap} onChange={onMindMapChange} />
+        <MindMapEditor bare={bare} data={mindMap} onChange={onMindMapChange} />
       ) : null}
     </div>
   );

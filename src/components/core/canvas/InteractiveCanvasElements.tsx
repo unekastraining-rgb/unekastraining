@@ -1,10 +1,15 @@
 "use client";
 
 import { TransformableElement } from "@/components/core/canvas/TransformableElement";
+import { RichTextEditor } from "@/components/core/RichTextEditor";
 import { CANVAS_ELEMENT_BASE_Z } from "@/lib/core/canvas-layer";
 import { resolvePageImageSrc } from "@/lib/core/clip-art-catalog";
 import { idsInSameGroup } from "@/lib/core/canvas-clipboard";
 import type { PageDecoration, PageImage, PageTextBox } from "@/lib/core/note-types";
+
+function newCanvasElementId(prefix: string): string {
+  return `${prefix}${Math.random().toString(36).slice(2, 9)}`;
+}
 
 function DecorationBody({ item }: { item: PageDecoration }) {
   const fill = item.color;
@@ -111,8 +116,47 @@ function DecorationBody({ item }: { item: PageDecoration }) {
     case "line":
       return (
         <div
-          className="h-full w-full"
-          style={{ borderBottom: `3px solid ${fill}`, opacity: item.opacity ?? 1 }}
+          className="flex h-full w-full items-center"
+          style={{ opacity: item.opacity ?? 1 }}
+        >
+          <div
+            className="w-full rounded-full"
+            style={{
+              height: Math.max(2, Math.min(12, item.h || 4)),
+              backgroundColor: fill,
+            }}
+          />
+        </div>
+      );
+    case "vline":
+      return (
+        <div
+          className="flex h-full w-full justify-center"
+          style={{ opacity: item.opacity ?? 1 }}
+        >
+          <div
+            className="h-full rounded-full"
+            style={{
+              width: Math.max(2, Math.min(12, item.w || 4)),
+              backgroundColor: fill,
+            }}
+          />
+        </div>
+      );
+    case "border_frame":
+      return (
+        <div
+          className="h-full w-full rounded-lg"
+          style={{
+            border: `3px solid ${border}`,
+            backgroundColor:
+              (item.fillOpacity ?? 0) > 0.04
+                ? `${fill}${Math.round((item.fillOpacity ?? 0) * 255)
+                    .toString(16)
+                    .padStart(2, "0")}`
+                : "transparent",
+            opacity: item.opacity ?? 1,
+          }}
         />
       );
     case "dot":
@@ -180,7 +224,9 @@ export function InteractiveCanvasElements({
   decorations,
   textBoxes,
   selectedIds,
+  focusTextBoxId = null,
   editable,
+  inkPassThrough = false,
   onSelect,
   onImagesChange,
   onDecorationsChange,
@@ -192,7 +238,10 @@ export function InteractiveCanvasElements({
   decorations: PageDecoration[];
   textBoxes: PageTextBox[];
   selectedIds: string[];
+  focusTextBoxId?: string | null;
   editable: boolean;
+  /** When ink tools are active, unselected elements let strokes pass through. */
+  inkPassThrough?: boolean;
   onSelect: (ids: string[]) => void;
   onImagesChange: (images: PageImage[]) => void;
   onDecorationsChange: (decorations: PageDecoration[]) => void;
@@ -201,6 +250,10 @@ export function InteractiveCanvasElements({
   resolveNextZIndex?: () => number;
 }) {
   const selectedSet = new Set(selectedIds);
+
+  function passThroughFor(id: string) {
+    return inkPassThrough && !selectedSet.has(id);
+  }
 
   function maxStackZ(): number {
     return Math.max(
@@ -276,7 +329,7 @@ export function InteractiveCanvasElements({
   function duplicateImage(image: PageImage) {
     const copy: PageImage = {
       ...image,
-      id: `img_${Math.random().toString(36).slice(2, 9)}`,
+      id: newCanvasElementId("img_"),
       x: image.x + 16,
       y: image.y + 16,
       groupId: undefined,
@@ -289,7 +342,7 @@ export function InteractiveCanvasElements({
   function duplicateDecoration(item: PageDecoration) {
     const copy: PageDecoration = {
       ...item,
-      id: `dec_${Math.random().toString(36).slice(2, 9)}`,
+      id: newCanvasElementId("dec_"),
       x: item.x + 16,
       y: item.y + 16,
       groupId: undefined,
@@ -302,7 +355,7 @@ export function InteractiveCanvasElements({
   function duplicateTextBox(box: PageTextBox) {
     const copy: PageTextBox = {
       ...box,
-      id: `tb_${Math.random().toString(36).slice(2, 9)}`,
+      id: newCanvasElementId("tb_"),
       x: box.x + 16,
       y: box.y + 16,
       groupId: undefined,
@@ -366,6 +419,7 @@ export function InteractiveCanvasElements({
       {images.map((image) => (
         <TransformableElement
           key={image.id}
+          elementId={image.id}
           rect={{
             x: image.x,
             y: image.y,
@@ -376,6 +430,7 @@ export function InteractiveCanvasElements({
           }}
           selected={selectedSet.has(image.id)}
           editable={editable}
+          pointerEventsNone={passThroughFor(image.id)}
           zIndex={image.zIndex ?? CANVAS_ELEMENT_BASE_Z}
           onSelect={(options) => handleSelect(image.id, options)}
           onChange={(patch) => {
@@ -431,6 +486,7 @@ export function InteractiveCanvasElements({
       {decorations.map((item) => (
         <TransformableElement
           key={item.id}
+          elementId={item.id}
           rect={{
             x: item.x,
             y: item.y,
@@ -442,6 +498,7 @@ export function InteractiveCanvasElements({
           selected={selectedSet.has(item.id)}
           editable={editable}
           dragFromHandleOnly={item.kind === "sticky"}
+          pointerEventsNone={passThroughFor(item.id)}
           zIndex={item.zIndex ?? CANVAS_ELEMENT_BASE_Z}
           onSelect={(options) => handleSelect(item.id, options)}
           onChange={(patch) => {
@@ -526,18 +583,28 @@ export function InteractiveCanvasElements({
               >
                 <div className="h-1 w-8 rounded-full bg-black/15" />
               </div>
-              <textarea
-                value={item.text ?? ""}
+              <RichTextEditor
+                id={item.id}
+                text={item.text ?? ""}
+                html={item.html}
+                color={item.textColor ?? "#44403c"}
+                selected={selectedSet.has(item.id)}
+                readOnly={!editable || Boolean(item.locked)}
+                placeholder="Note…"
+                className="h-full w-full pt-6"
                 onPointerDown={(event) => {
-                  event.stopPropagation();
                   if (!selectedSet.has(item.id)) {
                     handleSelect(item.id);
                   }
                 }}
-                onChange={(e) => onDecorationTextChange?.(item.id, e.target.value)}
-                className="h-full w-full resize-none bg-transparent px-3 pb-3 pt-7 text-sm outline-none"
-                style={{ color: item.textColor ?? "#44403c" }}
-                placeholder="Note…"
+                onChange={({ text, html }) => {
+                  onDecorationsChange(
+                    decorations.map((entry) =>
+                      entry.id === item.id ? { ...entry, text, html } : entry,
+                    ),
+                  );
+                  onDecorationTextChange?.(item.id, text);
+                }}
               />
             </div>
           ) : item.kind === "text_stamp" || item.kind === "banner" ? (
@@ -558,9 +625,15 @@ export function InteractiveCanvasElements({
         </TransformableElement>
       ))}
 
-      {textBoxes.map((box) => (
+      {textBoxes.map((box) => {
+        const isActive = selectedSet.has(box.id);
+        return (
         <TransformableElement
           key={box.id}
+          elementId={box.id}
+          dragFromHandleOnly
+          quietChrome
+          pointerEventsNone={passThroughFor(box.id)}
           rect={{
             x: box.x,
             y: box.y,
@@ -569,7 +642,7 @@ export function InteractiveCanvasElements({
             rotation: box.rotation,
             locked: box.locked,
           }}
-          selected={selectedSet.has(box.id)}
+          selected={isActive}
           editable={editable}
           zIndex={box.zIndex ?? CANVAS_ELEMENT_BASE_Z}
           onSelect={(options) => handleSelect(box.id, options)}
@@ -608,35 +681,64 @@ export function InteractiveCanvasElements({
           onLayerBackward={() => bumpLayer(box.id, "textbox", -1)}
         >
           <div
-            className="flex h-full flex-col overflow-hidden rounded-xl border border-stone-200/80 shadow-sm backdrop-blur-sm"
+            className="flex h-full min-h-[1.5rem] flex-col overflow-visible bg-transparent"
             style={{
-              backgroundColor: box.backgroundColor ?? "rgba(255,255,255,0.92)",
+              backgroundColor: box.backgroundColor ?? "transparent",
               opacity: box.opacity ?? 1,
             }}
+            onPointerDown={(event) => {
+              if (!editable || box.locked) return;
+              if (!isActive) {
+                event.stopPropagation();
+                handleSelect(box.id, { shiftKey: event.shiftKey });
+              }
+            }}
           >
-            <div
-              className="flex h-6 shrink-0 cursor-move items-center justify-center border-b border-stone-200/60 bg-stone-50/80"
-              aria-hidden
-            >
-              <div className="h-1 w-8 rounded-full bg-stone-300" />
-            </div>
-            <textarea
-              value={box.text}
-              onPointerDown={(e) => e.stopPropagation()}
-              onChange={(event) =>
+            <RichTextEditor
+              id={box.id}
+              text={box.text}
+              html={box.html}
+              color={box.color}
+              selected={isActive}
+              autoFocus={focusTextBoxId === box.id}
+              bare
+              // Idle text stays clickable but not editable until selected again —
+              // that restores dashed outline, move, resize, and format toolbar.
+              readOnly={!editable || Boolean(box.locked) || !isActive}
+              placeholder={isActive ? "Type…" : ""}
+              className="min-h-0 flex-1 bg-transparent"
+              onPointerDown={(event) => {
+                if (!editable || box.locked) return;
+                if (!isActive) {
+                  handleSelect(box.id, { shiftKey: event.shiftKey });
+                }
+              }}
+              onBlur={() => {
+                // Drop selection so chrome vanishes when typing is done.
+                window.setTimeout(() => {
+                  const active = document.activeElement as HTMLElement | null;
+                  if (
+                    active?.closest?.(
+                      `[data-element-id="${box.id}"], [data-text-format-toolbar], [data-text-format-dock], [data-canvas-inspector]`,
+                    )
+                  ) {
+                    return;
+                  }
+                  if (selectedSet.has(box.id)) removeFromSelection(box.id);
+                }, 0);
+              }}
+              onChange={({ text, html }) =>
                 onTextBoxesChange(
                   textBoxes.map((entry) =>
-                    entry.id === box.id ? { ...entry, text: event.target.value } : entry,
+                    entry.id === box.id ? { ...entry, text, html } : entry,
                   ),
                 )
               }
-              placeholder="Type here..."
-              className="h-full w-full flex-1 resize-none bg-transparent p-3 text-sm outline-none"
-              style={{ color: box.color ?? "#44403c" }}
             />
           </div>
         </TransformableElement>
-      ))}
+        );
+      })}
     </>
   );
 }

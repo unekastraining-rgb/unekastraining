@@ -1,5 +1,6 @@
 import type { StudyActivityType } from "@/generated/prisma";
 import { db } from "@/lib/db";
+import { readableCourseTitle } from "@/lib/courses/display-name";
 
 export interface CreateStudySessionInput {
   userId: string;
@@ -88,7 +89,7 @@ function dayKey(date: Date) {
 export async function buildStudyTelemetry(userId: string): Promise<StudyTelemetrySummary> {
   const sessions = await db.studySession.findMany({
     where: { userId },
-    include: { course: { select: { id: true, title: true } } },
+    include: { course: { select: { id: true, title: true, code: true } } },
     orderBy: { startedAt: "desc" },
     take: 200,
   });
@@ -107,7 +108,7 @@ export async function buildStudyTelemetry(userId: string): Promise<StudyTelemetr
 
     if (session.courseId && session.course?.title) {
       const courseEntry = minutesByCourseMap.get(session.courseId) ?? {
-        courseTitle: session.course.title,
+        courseTitle: readableCourseTitle(session.course.title, session.course.code),
         minutes: 0,
       };
       courseEntry.minutes += sessionMinutes;
@@ -187,7 +188,9 @@ export async function buildStudyTelemetry(userId: string): Promise<StudyTelemetr
       durationSeconds: session.durationSeconds,
       startedAt: session.startedAt.toISOString(),
       courseId: session.courseId,
-      courseTitle: session.course?.title ?? null,
+      courseTitle: session.course
+        ? readableCourseTitle(session.course.title, session.course.code)
+        : null,
     })),
     weeklyMinutes,
   };

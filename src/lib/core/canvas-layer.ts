@@ -4,7 +4,7 @@ import type { NoteDocument } from "@/lib/core/note-types";
 export const FORMAT_BLOCK_Z = 5;
 
 /** Default z-index for stickers, shapes, stickies, text boxes, and format blocks. */
-export const CANVAS_ELEMENT_BASE_Z = 10;
+export const CANVAS_ELEMENT_BASE_Z = 40;
 
 export function maxCanvasElementZIndex(doc: NoteDocument): number {
   const values = [

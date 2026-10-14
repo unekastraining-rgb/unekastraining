@@ -12,12 +12,23 @@ import {
   Upload,
 } from "lucide-react";
 
+import { DemoColdStartImport } from "@/components/hub/DemoColdStartImport";
 import { readJsonResponse } from "@/lib/api-json";
-import { coreCourseHref, launchStudyNowSession } from "@/lib/study/client-launch";
+import { hubTabPath } from "@/lib/hub/tabs";
+import { withLearningFocus } from "@/lib/study/learning-focus";
+import { coreStudyPackHref } from "@/lib/study/loop-hrefs";
+import { useTapHandler } from "@/hooks/useTapHandler";
 
 type StudyThisMode = "topic" | "syllabus" | "class";
 
-export function StudyThisCard({ compact = false }: { compact?: boolean }) {
+export function StudyThisCard({
+  compact = false,
+  /** Land on Study Haul HOW screen after creating a topic (learning-center journey). */
+  landOnHaul = false,
+}: {
+  compact?: boolean;
+  landOnHaul?: boolean;
+}) {
   const router = useRouter();
   const [mode, setMode] = useState<StudyThisMode>("topic");
   const [title, setTitle] = useState("");
@@ -49,7 +60,11 @@ export function StudyThisCard({ compact = false }: { compact?: boolean }) {
 
       const data = await readJsonResponse<{
         success?: boolean;
-        course?: { id: string };
+        learningTarget?: string;
+        course?: {
+          id: string;
+          topics?: Array<{ name: string }>;
+        };
         materialId?: string;
         noteId?: string;
         error?: string;
@@ -63,14 +78,25 @@ export function StudyThisCard({ compact = false }: { compact?: boolean }) {
       setFocus("");
       setSubject("");
 
-      router.push(
-        coreCourseHref({
-          courseId: data.course.id,
-          materialId: data.materialId,
-          noteId: data.noteId,
-          autoSession: true,
-        }),
-      );
+      const learningTarget =
+        (typeof data.learningTarget === "string" &&
+          data.learningTarget.trim()) ||
+        trimmed;
+      const params = new URLSearchParams({
+        courseId: data.course.id,
+        topic: learningTarget,
+      });
+      if (data.materialId) params.set("materialId", data.materialId);
+
+      if (landOnHaul) {
+        // Learning-center IA: establish WHAT, then learner chooses HOW.
+        router.push(`/study?${params.toString()}`);
+      } else {
+        // Direct teach-first entry (Locker / deep links).
+        router.push(
+          withLearningFocus(`/study/teach-me?${params.toString()}`, "teach"),
+        );
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not start this topic.");
     } finally {
@@ -110,11 +136,7 @@ export function StudyThisCard({ compact = false }: { compact?: boolean }) {
       setClassCode("");
 
       router.push(
-        coreCourseHref({
-          courseId: data.course.id,
-          noteId: data.noteId,
-          autoSession: true,
-        }),
+        coreStudyPackHref(data.course.id, trimmed),
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create class.");
@@ -123,6 +145,9 @@ export function StudyThisCard({ compact = false }: { compact?: boolean }) {
     }
   }
 
+  const tapTopicSubmit = useTapHandler(() => void handleTopicSubmit());
+  const tapClassSubmit = useTapHandler(() => void handleClassSubmit());
+
   const modes: { id: StudyThisMode; label: string; icon: typeof Sparkles }[] = [
     { id: "topic", label: "Any topic", icon: Sparkles },
     { id: "syllabus", label: "Syllabus", icon: ScanLine },
@@ -130,7 +155,10 @@ export function StudyThisCard({ compact = false }: { compact?: boolean }) {
   ];
 
   return (
-    <section className={`card-soft relative overflow-hidden ${compact ? "p-4" : "p-5"}`}>
+    <section
+      data-hub-chrome
+      className={`card-soft relative overflow-hidden ${compact ? "p-4" : "p-5"}`}
+    >
       <div className="flex items-start gap-3">
         <div className="theme-icon-tile-warm !p-2.5">
           <BookOpen className="h-5 w-5" />
@@ -140,8 +168,8 @@ export function StudyThisCard({ compact = false }: { compact?: boolean }) {
             Study this
           </h2>
           <p className="text-body mt-1 text-sm">
-            One entry point — syllabus, new class, or anything you want to learn.
-            We&apos;ll set up your notebook in Core and suggest a first session.
+            Learn something new — type a subject and start. No LMS required.
+            We&apos;ll open a Study Haul for that subject so you can learn, practice, quiz, or review.
           </p>
         </div>
       </div>
@@ -200,31 +228,38 @@ export function StudyThisCard({ compact = false }: { compact?: boolean }) {
           <button
             type="button"
             disabled={!title.trim() || loading}
-            onClick={() => void handleTopicSubmit()}
-            className="btn-primary sm:col-span-2 inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm shadow-md disabled:opacity-60"
+            {...tapTopicSubmit}
+            className="btn-primary sm:col-span-2 inline-flex min-h-11 items-center justify-center gap-2 px-5 py-2.5 text-sm shadow-md disabled:opacity-60 touch-manipulation"
           >
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-            {loading ? "Setting up…" : "Study this → Core + first session"}
+            {loading ? "Setting up…" : "Study this → Core pack + loop"}
           </button>
         </div>
       ) : null}
 
       {mode === "syllabus" ? (
         <div className="surface-muted mt-4 rounded-2xl p-4 text-sm">
-          <p className="text-heading font-semibold">
-            Upload a syllabus
-          </p>
+          <p className="text-heading font-semibold">Cold start from a syllabus</p>
           <p className="text-body mt-1">
-            We&apos;ll parse due dates, meetings, and materials — then open Core with
-            your class notebook.
+            Photo a syllabus page (OCR → topics), upload a PDF, or sync Canvas — then Study from
+            topics / Blurt in Core without pasting a chapter.
           </p>
-          <Link
-            href="/courses"
-            className="btn-accent mt-3 inline-flex items-center gap-2 px-4 py-2 text-sm shadow-md"
-          >
-            <Upload className="h-4 w-4" />
-            Scan syllabus
-          </Link>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Link
+              href="/courses"
+              className="btn-accent inline-flex min-h-11 items-center gap-2 px-4 py-2 text-sm shadow-md touch-manipulation"
+            >
+              <Upload className="h-4 w-4" />
+              Scan / upload syllabus
+            </Link>
+            <Link
+              href={hubTabPath("settings")}
+              className="inline-flex items-center gap-2 rounded-full border border-brand px-4 py-2 text-sm font-semibold text-stone-700 hover:bg-white"
+            >
+              Sync Canvas / LMS
+            </Link>
+          </div>
+          <DemoColdStartImport compact className="mt-4" />
         </div>
       ) : null}
 
@@ -255,11 +290,11 @@ export function StudyThisCard({ compact = false }: { compact?: boolean }) {
           <button
             type="button"
             disabled={!className.trim() || loading}
-            onClick={() => void handleClassSubmit()}
-            className="btn-primary sm:col-span-2 inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm shadow-md disabled:opacity-60"
+            {...tapClassSubmit}
+            className="btn-primary sm:col-span-2 inline-flex min-h-11 items-center justify-center gap-2 px-5 py-2.5 text-sm shadow-md disabled:opacity-60 touch-manipulation"
           >
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <GraduationCap className="h-4 w-4" />}
-            {loading ? "Creating…" : "Create class → Core + first session"}
+            {loading ? "Creating…" : "Create class → Core study pack"}
           </button>
         </div>
       ) : null}

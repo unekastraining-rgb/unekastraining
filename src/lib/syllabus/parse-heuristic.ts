@@ -45,7 +45,7 @@ function parseIsoDate(match: RegExpMatchArray, semesterYear?: number | null): st
 
   const monthToken = (match[1] ?? "").toLowerCase().slice(0, 3);
   const day = Number(match[2]);
-  let year = match[3] ? Number(match[3]) : semesterYear;
+  const year = match[3] ? Number(match[3]) : semesterYear;
   const monthMap: Record<string, number> = {
     jan: 1,
     feb: 2,

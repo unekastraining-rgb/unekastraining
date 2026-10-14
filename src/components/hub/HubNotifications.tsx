@@ -5,16 +5,19 @@ import Link from "next/link";
 import { Bell, X } from "lucide-react";
 
 import type { AppNotification } from "@/lib/notifications";
+import { useIsClientMounted } from "@/hooks/useClientSnapshot";
+import { useTapHandler } from "@/hooks/useTapHandler";
 
 export function HubNotifications() {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<AppNotification[]>([]);
   const [count, setCount] = useState(0);
   const [busy, setBusy] = useState(false);
+  const mounted = useIsClientMounted();
   const panelRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
-    const response = await fetch("/api/notifications");
+    const response = await fetch("/api/notifications", { credentials: "same-origin" });
     const data = await response.json();
     if (data.success) {
       setItems(data.data);
@@ -23,19 +26,21 @@ export function HubNotifications() {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async data load on mount or dependency change
     void load();
     const interval = window.setInterval(() => void load(), 60_000);
     return () => window.clearInterval(interval);
   }, [load]);
 
   useEffect(() => {
+    if (!open) return;
     function onClickOutside(event: MouseEvent) {
       if (panelRef.current && !panelRef.current.contains(event.target as Node)) {
         setOpen(false);
       }
     }
-    if (open) document.addEventListener("mousedown", onClickOutside);
-    return () => document.removeEventListener("mousedown", onClickOutside);
+    document.addEventListener("click", onClickOutside);
+    return () => document.removeEventListener("click", onClickOutside);
   }, [open]);
 
   async function patchNotifications(body: Record<string, unknown>) {
@@ -44,6 +49,7 @@ export function HubNotifications() {
       const response = await fetch("/api/notifications", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
         body: JSON.stringify(body),
       });
       const data = await response.json();
@@ -66,16 +72,25 @@ export function HubNotifications() {
     await patchNotifications({ read: id });
   }
 
+  const toggleOpen = useTapHandler(() => setOpen((value) => !value));
+  const tapMarkRead = useTapHandler(() => void patchNotifications({ markAllRead: true }));
+  const tapDismissAll = useTapHandler(() => void patchNotifications({ dismissAll: true }));
+  const tapClose = useTapHandler(() => setOpen(false));
+
   return (
     <div className="relative" ref={panelRef}>
       <button
         type="button"
-        onClick={() => setOpen((value) => !value)}
-        className="relative rounded-xl border border-brand bg-white p-2.5 text-stone-600 transition hover:bg-brand-soft"
+        {...toggleOpen}
+        suppressHydrationWarning
+        className="relative cursor-pointer rounded-xl border border-brand bg-white p-2.5 text-stone-600 transition touch-manipulation hover:bg-brand-soft"
         aria-label="Notifications"
+        aria-expanded={open}
       >
-        <Bell className="h-5 w-5" />
-        {count > 0 ? (
+        <span className="shrink-0" suppressHydrationWarning aria-hidden>
+          <Bell className="h-5 w-5" />
+        </span>
+        {mounted && count > 0 ? (
           <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white">
             {count > 9 ? "9+" : count}
           </span>
@@ -83,7 +98,7 @@ export function HubNotifications() {
       </button>
 
       {open ? (
-        <div className="absolute right-0 top-full z-50 mt-2 w-80 rounded-2xl border border-brand bg-white p-3 shadow-xl">
+        <div className="absolute right-0 top-full z-[100] mt-2 w-[min(20rem,calc(100vw-2rem))] rounded-2xl border border-brand bg-white p-3 shadow-xl touch-manipulation">
           <div className="mb-2 flex items-center justify-between gap-2 px-1">
             <p className="text-sm font-bold text-stone-900">Notifications</p>
             <div className="flex items-center gap-1">
@@ -92,16 +107,16 @@ export function HubNotifications() {
                   <button
                     type="button"
                     disabled={busy || count === 0}
-                    onClick={() => void patchNotifications({ markAllRead: true })}
-                    className="rounded px-2 py-1 text-[11px] font-semibold text-stone-500 transition hover:bg-stone-100 disabled:opacity-40"
+                    {...tapMarkRead}
+                    className="rounded px-2 py-1 text-[11px] font-semibold text-stone-500 transition touch-manipulation hover:bg-stone-100 disabled:opacity-40"
                   >
                     Mark read
                   </button>
                   <button
                     type="button"
                     disabled={busy}
-                    onClick={() => void patchNotifications({ dismissAll: true })}
-                    className="rounded px-2 py-1 text-[11px] font-semibold text-stone-500 transition hover:bg-stone-100 disabled:opacity-40"
+                    {...tapDismissAll}
+                    className="rounded px-2 py-1 text-[11px] font-semibold text-stone-500 transition touch-manipulation hover:bg-stone-100 disabled:opacity-40"
                   >
                     Clear all
                   </button>
@@ -109,10 +124,12 @@ export function HubNotifications() {
               ) : null}
               <button
                 type="button"
-                onClick={() => setOpen(false)}
-                className="rounded p-1 text-stone-400 hover:bg-stone-100"
+                {...tapClose}
+                className="rounded p-1 text-stone-400 touch-manipulation hover:bg-stone-100"
               >
-                <X className="h-4 w-4" />
+                <span className="shrink-0" suppressHydrationWarning aria-hidden>
+                  <X className="h-4 w-4" />
+                </span>
               </button>
             </div>
           </div>
@@ -146,7 +163,9 @@ export function HubNotifications() {
                     className="absolute right-2 top-2 rounded p-1 text-stone-400 opacity-0 transition hover:bg-white/80 group-hover:opacity-100"
                     aria-label={`Dismiss ${item.title}`}
                   >
-                    <X className="h-3.5 w-3.5" />
+                    <span className="shrink-0" suppressHydrationWarning aria-hidden>
+                      <X className="h-3.5 w-3.5" />
+                    </span>
                   </button>
                 </li>
               ))}

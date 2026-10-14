@@ -1,11 +1,15 @@
 import type { LuckyActivity } from "./lucky";
 import type { SixComponent } from "./six";
+import { isMetaSyllabusTopic } from "./six-worked-lesson";
+import { sixGuideHref } from "./six-guides";
+import { luckyQuizHref, sixChunkingHref, withColdStartTopic, withCourseContext } from "@/lib/study/loop-hrefs";
 
 export type StudyMinutes = 5 | 10 | 20 | 30 | 45 | 60;
 
 export interface StudyNowTopicPick {
   topicId: string;
   topicName: string;
+  courseId: string;
   courseTitle: string;
   component: SixComponent;
   componentTitle: string;
@@ -58,7 +62,8 @@ function sixBlockFromTopic(topic: StudyNowTopicPick, minutes: number, index = 0)
 
 function allocateSixMinutes(total: StudyMinutes, topicCount: number): number[] {
   if (topicCount <= 0) return [];
-  if (total <= 5) return [];
+  // Micro Six still owns the loop on a 5-minute clock (then Lucky fills the rest).
+  if (total <= 5) return [3];
 
   if (total <= 10) {
     return [Math.min(8, total - 2)];
@@ -119,7 +124,7 @@ function buildRetentionBlocks(
         8,
         hasUpcomingDeadline ? "Assignment focus" : "Hands-on practice",
         hasUpcomingDeadline ? "planner" : "hands-on-practice",
-        hasUpcomingDeadline ? "/dashboard" : "/study/blurting",
+        hasUpcomingDeadline ? "/dashboard" : sixGuideHref("hands-on-practice"),
       ),
     );
   }
@@ -143,10 +148,44 @@ function buildRetentionBlocks(
       block("mixed", 8, "Mixed review", "mixed-review", "/study/mixed"),
     );
   } else if (minutes >= 10) {
-    blocks.push(block("flashcards", 5, "Active recall", "flashcards", "/flashcards"));
+    blocks.push(
+      block(
+        "flashcards",
+        5,
+        "Active recall",
+        "active-recall",
+        sixGuideHref("active-recall"),
+      ),
+    );
   }
 
   return blocks;
+}
+
+/** Syllabus/LMS topics when Six recommendations are empty (no mastery yet). */
+export function buildColdStartFocusTopics(input: {
+  courseId: string;
+  courseTitle: string;
+  topicNames: string[];
+  limit?: number;
+}): StudyNowTopicPick[] {
+  const limit = input.limit ?? 2;
+  const eligible = input.topicNames
+    .map((name) => name.trim())
+    .filter((name) => name && !isMetaSyllabusTopic(name))
+    .slice(0, limit);
+
+  return eligible.map((topicName, index) => ({
+    topicId: `cold-start-${index}`,
+    topicName,
+    courseId: input.courseId,
+    courseTitle: input.courseTitle,
+    component: "chunking" as SixComponent,
+    componentTitle: "Chunking",
+    href: sixChunkingHref(input.courseId, topicName),
+    reason: "Cold start from LMS/syllabus topics — no upload required.",
+    proficiency: 0,
+  }));
 }
 
 export function buildStudyNowPlan(
@@ -162,7 +201,7 @@ export function buildStudyNowPlan(
   const { hasUpcomingDeadline, missedQuestions = 0, dueFlashcards = 0 } = context;
   const topics = focusTopics.slice(0, 2);
 
-  if (topics.length > 0 && minutes >= 10) {
+  if (topics.length > 0 && minutes >= 5) {
     const sixMinutes = allocateSixMinutes(minutes, topics.length);
     const sixBlocks = topics
       .slice(0, sixMinutes.length)
@@ -170,10 +209,24 @@ export function buildStudyNowPlan(
 
     const sixTotal = sixBlocks.reduce((acc, item) => acc + item.minutes, 0);
     const remaining = Math.max(0, minutes - sixTotal);
-    const retentionBlocks = buildRetentionBlocks(
+    let retentionBlocks = buildRetentionBlocks(
       remaining >= 20 ? 20 : remaining >= 10 ? 10 : 5,
       { hasUpcomingDeadline, missedQuestions, dueFlashcards },
     );
+
+    // Always close Core → Six → Lucky — even on a 5-minute clock.
+    if (!retentionBlocks.some((item) => item.activity === "quiz")) {
+      retentionBlocks = [
+        block(
+          "quiz",
+          Math.min(7, Math.max(2, remaining || 2)),
+          "Lucky quiz",
+          "quiz",
+          "/quizzes",
+        ),
+        ...retentionBlocks,
+      ];
+    }
 
     let blocks = [...sixBlocks, ...retentionBlocks];
     blocks = scaleBlocksToTotal(blocks, minutes);
@@ -195,9 +248,16 @@ export function buildStudyNowPlan(
   if (minutes <= 5) {
     return {
       totalMinutes: minutes,
-      summary: "Quick active recall burst.",
+      summary: "Micro Six → Lucky burst — not a flashcard dump.",
       blocks: [
-        block("flashcards", 5, "Active recall flashcards", "flashcards", "/flashcards"),
+        block(
+          "chunking",
+          3,
+          "Chunk one idea",
+          "chunking",
+          sixGuideHref("chunking"),
+        ),
+        block("quiz", 2, "Lucky quiz", "quiz", "/quizzes"),
       ],
     };
   }
@@ -207,7 +267,13 @@ export function buildStudyNowPlan(
       totalMinutes: minutes,
       summary: "Short Six warm-up, then Lucky recall.",
       blocks: [
-        block("chunking", 5, "Chunk or explain one topic", "chunking", "/study/teach-me"),
+        block(
+          "chunking",
+          5,
+          "Chunk or explain one topic",
+          "chunking",
+          sixGuideHref("chunking"),
+        ),
         block(
           "review",
           5,
@@ -224,7 +290,13 @@ export function buildStudyNowPlan(
       totalMinutes: minutes,
       summary: "Understand, then test yourself.",
       blocks: [
-        block("feynman", 8, "Six — explain or visualize", "feynman", "/study/teach-me"),
+        block(
+          "feynman",
+          8,
+          "Six — explain or visualize",
+          "feynman",
+          sixGuideHref("feynman"),
+        ),
         block("quiz", 7, "Lucky quiz", "quiz", "/quizzes"),
         block(
           "spaced",
@@ -244,13 +316,19 @@ export function buildStudyNowPlan(
         ? "Deadline-focused: practice then quiz."
         : "Balanced Six → practice → Lucky session.",
       blocks: [
-        block("explain", 10, "Six explanation", "detailed-explanation", "/study/teach-me"),
+        block(
+          "explain",
+          10,
+          "Six explanation",
+          "detailed-explanation",
+          sixGuideHref("detailed-explanation"),
+        ),
         block(
           "practice",
           10,
           hasUpcomingDeadline ? "Assignment focus" : "Hands-on practice",
           hasUpcomingDeadline ? "planner" : "hands-on-practice",
-          hasUpcomingDeadline ? "/dashboard" : "/study/blurting",
+          hasUpcomingDeadline ? "/dashboard" : sixGuideHref("hands-on-practice"),
         ),
         block("quiz", 5, "Lucky quiz", "quiz", "/quizzes"),
         block(
@@ -258,15 +336,27 @@ export function buildStudyNowPlan(
           5,
           missedQuestions > 0 ? "Missed-question review" : "Active recall",
           missedQuestions > 0 ? "missed-review" : "active-recall",
-          missedQuestions > 0 ? "/quizzes?filter=missed" : "/flashcards",
+          missedQuestions > 0 ? "/quizzes?filter=missed" : sixGuideHref("active-recall"),
         ),
       ],
     };
   }
 
   const fullBlocks: StudyBlock[] = [
-    block("chunk", 10, "Review notes / chunk topics", "chunking", "/core"),
-    block("practice", 15, "Hands-on practice", "hands-on-practice", "/study/blurting"),
+    block(
+      "chunk",
+      10,
+      "Review notes / chunk topics",
+      "chunking",
+      sixGuideHref("chunking"),
+    ),
+    block(
+      "practice",
+      15,
+      "Hands-on practice",
+      "hands-on-practice",
+      sixGuideHref("hands-on-practice"),
+    ),
     block("quiz", 10, "Lucky quiz", "quiz", "/quizzes"),
     block(
       "mixed",
@@ -283,4 +373,83 @@ export function buildStudyNowPlan(
     summary: "Full CSL loop: Core review → Six → Lucky → mastery check.",
     blocks: fullBlocks.slice(0, minutes >= 60 ? 5 : 4),
   };
+}
+
+const SIX_TOPIC_ACTIVITIES = new Set<SixComponent>([
+  "chunking",
+  "detailed-explanation",
+  "feynman",
+  "visualization",
+  "hands-on-practice",
+  "active-recall",
+]);
+
+/** Attach course + topic context so Hub Study Now lands in Core→Six→Lucky, not generic pages. */
+export function enrichStudyNowBlocksForCourse(
+  blocks: StudyBlock[],
+  input: {
+    courseId?: string | null;
+    courseTitle?: string | null;
+    focusTopics?: StudyNowTopicPick[];
+  },
+): StudyBlock[] {
+  const focusTopic = input.focusTopics?.[0];
+  const effectiveCourseId = input.courseId?.trim() || focusTopic?.courseId || null;
+  const effectiveCourseTitle =
+    input.courseTitle?.trim() || focusTopic?.courseTitle || null;
+  const focusTopicName = focusTopic?.topicName?.trim() || null;
+
+  return blocks.map((item) => {
+    let enriched = item;
+
+    if (item.activity === "quiz" && effectiveCourseId) {
+      enriched = {
+        ...enriched,
+        href: luckyQuizHref(effectiveCourseId, null, focusTopicName),
+        subtitle:
+          enriched.subtitle ??
+          `${effectiveCourseTitle ?? "Course"} · auto-build from topics`,
+        topicName: focusTopicName ?? enriched.topicName,
+      };
+    }
+
+    if (enriched.topicName || !effectiveCourseId) {
+      return enriched.href && effectiveCourseId
+        ? {
+            ...enriched,
+            href: withColdStartTopic(
+              withCourseContext(enriched.href, effectiveCourseId),
+              enriched.topicName ?? focusTopicName,
+            ),
+          }
+        : enriched;
+    }
+
+    if (SIX_TOPIC_ACTIVITIES.has(enriched.activity as SixComponent)) {
+      const topicParam = encodeURIComponent(focusTopicName ?? effectiveCourseTitle ?? "notes");
+      const baseHref = enriched.href ?? sixGuideHref(enriched.activity as SixComponent);
+      const href = baseHref.startsWith("/study/six/")
+        ? `${baseHref}${baseHref.includes("?") ? "&" : "?"}courseId=${encodeURIComponent(effectiveCourseId)}&topic=${topicParam}`
+        : baseHref;
+
+      enriched = {
+        ...enriched,
+        topicName: focusTopicName ?? effectiveCourseTitle ?? enriched.topicName,
+        subtitle: enriched.subtitle ?? effectiveCourseTitle ?? undefined,
+        href,
+      };
+    }
+
+    if (enriched.href && effectiveCourseId) {
+      enriched = {
+        ...enriched,
+        href: withColdStartTopic(
+          withCourseContext(enriched.href, effectiveCourseId),
+          focusTopicName,
+        ),
+      };
+    }
+
+    return enriched;
+  });
 }

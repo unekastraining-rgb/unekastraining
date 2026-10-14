@@ -2,43 +2,73 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Loader2, Play } from "lucide-react";
 
 import { saveStudySession } from "@/components/study/StudySessionRunner";
+import { StudyLoopStrip } from "@/components/study/StudyLoopStrip";
 import type { MixedReviewStep } from "@/lib/csl/mixed-review";
+import { resolveLoopFocusTopic } from "@/lib/study/resolve-loop-focus-topic";
 
 export function MixedReviewView() {
+  const searchParams = useSearchParams();
+  const queryCourseId = searchParams.get("courseId")?.trim() || "";
+  const urlTopic = searchParams.get("topic")?.trim() || null;
   const [loading, setLoading] = useState(true);
   const [steps, setSteps] = useState<MixedReviewStep[]>([]);
   const [summary, setSummary] = useState("");
+  const [courseId, setCourseId] = useState<string | null>(null);
+  const [courseTitle, setCourseTitle] = useState<string | null>(null);
+  const [topics, setTopics] = useState<string[]>([]);
+  const [apiFocusTopic, setApiFocusTopic] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
-      const response = await fetch("/api/study/mixed-review");
+      setLoading(true);
+      const params = new URLSearchParams();
+      if (queryCourseId) params.set("courseId", queryCourseId);
+      if (urlTopic) params.set("topic", urlTopic);
+      const query = params.toString();
+      const response = await fetch(
+        `/api/study/mixed-review${query ? `?${query}` : ""}`,
+      );
       const data = await response.json();
       if (data.success) {
         setSteps(data.data.steps);
         setSummary(data.data.summary);
+        setCourseId(data.data.courseId ?? null);
+        setCourseTitle(data.data.courseTitle ?? null);
+        setTopics(Array.isArray(data.data.topics) ? data.data.topics : []);
+        setApiFocusTopic(
+          typeof data.data.focusTopic === "string" ? data.data.focusTopic : null,
+        );
       }
       setLoading(false);
     }
     void load();
-  }, []);
+  }, [queryCourseId, urlTopic]);
 
   function startAsSession() {
+    const focusTopic = resolveLoopFocusTopic(urlTopic, topics) || apiFocusTopic;
     saveStudySession({
       summary,
       totalMinutes: 30,
       activityType: "NOTES_REVIEW",
+      courseId,
+      courseTitle,
+      coldStartTopic: focusTopic,
       blocks: steps.map((step) => ({
         id: step.id,
         minutes: step.minutes,
         label: step.label,
         activity: step.activity,
         href: step.href,
+        topicName: focusTopic ?? undefined,
       })),
     });
-    window.location.href = "/study/session";
+    const params = new URLSearchParams({ minutes: "30" });
+    if (courseId) params.set("courseId", courseId);
+    window.location.href = `/study/session?${params.toString()}`;
   }
 
   if (loading) {
@@ -59,6 +89,15 @@ export function MixedReviewView() {
         <p className="mt-2 text-stone-600">{summary}</p>
       </div>
 
+      {courseId && courseTitle ? (
+        <StudyLoopStrip
+          courseId={courseId}
+          courseTitle={courseTitle}
+          topics={topics}
+          focusTopic={resolveLoopFocusTopic(urlTopic, topics) || apiFocusTopic}
+        />
+      ) : null}
+
       <ul className="space-y-3">
         {steps.map((step, index) => (
           <li
@@ -72,7 +111,11 @@ export function MixedReviewView() {
             </div>
             <div className="text-right">
               <p className="text-xs text-stone-500">{step.minutes} min</p>
-              <Link href={step.href} className="text-sm font-semibold text-violet-600 hover:underline">
+              <Link
+                href={step.href}
+                data-hub-chrome
+                className="inline-flex min-h-11 items-center text-sm font-semibold text-violet-600 hover:underline touch-manipulation"
+              >
                 Open →
               </Link>
             </div>
@@ -83,7 +126,7 @@ export function MixedReviewView() {
       <button
         type="button"
         onClick={startAsSession}
-        className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-violet-600 px-5 py-3 text-sm font-semibold text-white hover:bg-violet-500"
+        className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-violet-600 px-5 py-3 text-sm font-semibold text-white hover:bg-violet-500 touch-manipulation"
       >
         <Play className="h-4 w-4" /> Run as guided session
       </button>

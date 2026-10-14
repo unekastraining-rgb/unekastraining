@@ -4,6 +4,7 @@ import { aiService } from "@/lib/ai";
 import { aiUnavailableResponse } from "@/lib/ai/http";
 import { isAIConfigured } from "@/lib/ai/is-configured";
 import { normalizeResourceCategory, RESOURCE_CATEGORY_LABELS } from "@/lib/resources/types";
+import { getUserAppSettings } from "@/lib/settings/app-settings";
 import { getOrCreateDefaultUser } from "@/lib/user";
 
 export async function POST(request: Request) {
@@ -12,7 +13,8 @@ export async function POST(request: Request) {
       return aiUnavailableResponse("Resource enhancement");
     }
 
-    await getOrCreateDefaultUser();
+    const user = await getOrCreateDefaultUser();
+    const appSettings = await getUserAppSettings(user.id);
     const body = await request.json();
     const title = String(body.title ?? "").trim();
     const url = String(body.url ?? "").trim();
@@ -39,7 +41,7 @@ export async function POST(request: Request) {
         role: "user",
         content: `Title: ${title || "Untitled"}\nURL: ${url || "n/a"}\nExisting description: ${description || "none"}\nAllowed categories: ${categories}`,
       },
-    ]);
+    ], { includeOpenAIPro: appSettings.aiUseOpenAIPro });
 
     let parsed: {
       description?: string;

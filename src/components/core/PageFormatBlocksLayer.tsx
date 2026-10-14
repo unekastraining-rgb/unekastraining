@@ -1,14 +1,39 @@
 "use client";
 
-import { GripVertical } from "lucide-react";
+import { useEffect, useRef } from "react";
 
 import { TransformableElement } from "@/components/core/canvas/TransformableElement";
 import { CANVAS_ELEMENT_BASE_Z, nextCanvasElementZIndex } from "@/lib/core/canvas-layer";
 import { getFormatDefinition } from "@/lib/core/format-catalog";
-import { ensureBlockPositions } from "@/lib/core/block-layout";
+import {
+  ensureBlockPositions,
+  rectsOverlap,
+} from "@/lib/core/block-layout";
+import { reflowSectionsToRegions } from "@/lib/core/study-page-plan";
+import { hasLockedStudyTemplateLayout } from "@/lib/core/study-templates";
 import type { CompositeSection, NoteDocument } from "@/lib/core/note-types";
 import { removeCompositeSection } from "@/lib/core/section-format-data";
 import { FormatBlockEditor } from "@/components/core/CompositeFormatSections";
+
+function sectionRect(section: CompositeSection) {
+  return {
+    x: section.x ?? 0,
+    y: section.y ?? 0,
+    width: section.width ?? 0,
+    height: section.height ?? 0,
+  };
+}
+
+function sectionsOverlap(sections: CompositeSection[]): boolean {
+  for (let i = 0; i < sections.length; i++) {
+    for (let j = i + 1; j < sections.length; j++) {
+      if (rectsOverlap(sectionRect(sections[i]!), sectionRect(sections[j]!), 4)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
 
 export function PageFormatBlocksLayer({
   sections,
@@ -27,6 +52,10 @@ export function PageFormatBlocksLayer({
 }) {
   const positioned = ensureBlockPositions(sections);
   const selectedSet = new Set(selectedIds);
+  const repairKey = positioned
+    .map((section) => `${section.id}:${section.x}:${section.y}:${section.width}:${section.height}`)
+    .join("|");
+  const lastRepairKey = useRef("");
 
   function bringToFront(id: string) {
     const next = nextCanvasElementZIndex(doc);
@@ -68,25 +97,39 @@ export function PageFormatBlocksLayer({
     );
   }
 
+  useEffect(() => {
+    if (lastRepairKey.current === repairKey) return;
+    if (hasLockedStudyTemplateLayout(doc) || positioned.length < 2 || !sectionsOverlap(positioned)) {
+      lastRepairKey.current = repairKey;
+      return;
+    }
+    lastRepairKey.current = repairKey;
+    patchSections(reflowSectionsToRegions(positioned, positioned[0]?.y ?? 48));
+  }, [repairKey, doc.metadata?.studyTemplateId]);
+
   return (
     <>
       {positioned.map((section) => {
         const def = getFormatDefinition(section.formatId);
         const blockX = section.x ?? 32;
         const blockY = section.y ?? 32;
-        const blockW = section.width ?? 320;
-        const blockH = section.height ?? 280;
+        const blockW = section.width ?? 300;
+        const blockH = section.height ?? 140;
+        const isActive = selectedSet.has(section.id);
 
         return (
           <TransformableElement
             key={section.id}
+            elementId={section.id}
+            dragFromHandleOnly
+            quietChrome
             rect={{
               x: blockX,
               y: blockY,
               width: blockW,
               height: blockH,
             }}
-            selected={selectedSet.has(section.id)}
+            selected={isActive}
             editable={editable}
             zIndex={section.zIndex ?? CANVAS_ELEMENT_BASE_Z}
             onSelect={(options) => handleSelect(section.id, options)}
@@ -119,24 +162,35 @@ export function PageFormatBlocksLayer({
             }
           >
             <div
-              className="flex h-full flex-col overflow-hidden rounded-2xl border border-stone-200/90 bg-white/95 shadow-md backdrop-blur-sm"
+              className={`flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-sm ${
+                isActive
+                  ? ""
+                  : "outline outline-1 outline-dashed outline-transparent hover:outline-stone-300/80"
+              }`}
               data-format-block={section.id}
+              onPointerDown={(event) => {
+                if (!editable) return;
+                if (!isActive) {
+                  event.stopPropagation();
+                  handleSelect(section.id, { shiftKey: event.shiftKey });
+                }
+              }}
             >
-              <div className="flex shrink-0 cursor-move items-center gap-2 border-b border-stone-100 bg-stone-50/80 px-2 py-1.5">
-                <span className="rounded p-1 text-stone-400" aria-hidden>
-                  <GripVertical className="h-3.5 w-3.5" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-[11px] font-bold text-stone-800">
-                    {def.emoji} {section.title || def.label}
-                  </p>
-                </div>
-              </div>
-              <div
-                className="min-h-0 flex-1 overflow-auto p-2"
-                onPointerDown={(event) => event.stopPropagation()}
+              <p
+                className={`shrink-0 truncate px-0.5 text-[10px] font-semibold uppercase tracking-wider ${
+                  isActive ? "mb-1 text-stone-500" : "mb-0.5 text-stone-400/80"
+                }`}
               >
-                <FormatBlockEditor section={section} doc={doc} setDoc={setDoc} />
+                {section.title || def.label}
+              </p>
+              <div className="min-h-0 min-w-0 flex-1 overflow-auto break-words [overflow-wrap:anywhere]">
+                <FormatBlockEditor
+                  section={section}
+                  doc={doc}
+                  setDoc={setDoc}
+                  bare
+                  selected={isActive}
+                />
               </div>
             </div>
           </TransformableElement>

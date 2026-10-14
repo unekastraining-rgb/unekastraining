@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Clock, Heart, Search, Sticker, Upload } from "lucide-react";
 
+import { CoreChromeAction } from "@/components/core/CoreChromeAction";
 import { resolvePageImageSrc } from "@/lib/core/clip-art-catalog";
 import {
   CLIP_ART_GROUP_LABELS,
@@ -16,7 +17,6 @@ import {
   getElementFavorites,
   getRecentElements,
   recordRecentElement,
-  toggleElementFavorite,
 } from "@/lib/core/elements/storage";
 
 export function StickersPanel({
@@ -34,7 +34,10 @@ export function StickersPanel({
   const [imported, setImported] = useState<Array<{ id: string; name: string }>>([]);
   const [uploading, setUploading] = useState(false);
 
+  const touchChip = compact ? " min-h-11 touch-manipulation" : "";
+
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync UI state to props or external subscription
     setFavorites(getElementFavorites());
     setRecent(getRecentElements());
   }, []);
@@ -47,6 +50,7 @@ export function StickersPanel({
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async data load on mount or dependency change
     void loadImported();
   }, [loadImported]);
 
@@ -134,17 +138,17 @@ export function StickersPanel({
             { id: "mine", label: "My Stickers", icon: Upload },
           ] as const
         ).map(({ id, label, icon: Icon }) => (
-          <button
+          <CoreChromeAction
             key={id}
-            type="button"
-            onClick={() => setTab(id)}
-            className={`inline-flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1 text-[10px] font-semibold ${
+            onActivate={() => setTab(id)}
+            pressed={tab === id}
+            className={`inline-flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1 text-[10px] font-semibold${touchChip} ${
               tab === id ? "bg-stone-900 text-white" : "bg-stone-100 text-stone-600"
             }`}
           >
             <Icon className="h-3 w-3" />
             {label}
-          </button>
+          </CoreChromeAction>
         ))}
       </div>
 
@@ -161,16 +165,16 @@ export function StickersPanel({
       {tab === "browse" ? (
         <div className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-1">
           {STICKER_GROUPS_LIST.map((key) => (
-            <button
+            <CoreChromeAction
               key={key}
-              type="button"
-              onClick={() => setGroup(key)}
-              className={`shrink-0 rounded-lg px-2 py-1 text-[10px] font-semibold ${
+              onActivate={() => setGroup(key)}
+              pressed={group === key}
+              className={`shrink-0 rounded-lg px-2 py-1 text-[10px] font-semibold${touchChip} ${
                 group === key ? "bg-violet-500 text-white" : "bg-stone-100 text-stone-600"
               }`}
             >
               {CLIP_ART_GROUP_LABELS[key]}
-            </button>
+            </CoreChromeAction>
           ))}
         </div>
       ) : null}
@@ -194,12 +198,12 @@ export function StickersPanel({
 
       <div className="grid max-h-72 grid-cols-4 gap-2 overflow-y-auto sm:grid-cols-5">
         {displayed.map((item) => (
-          <button
+          <CoreChromeAction
             key={item.id}
-            type="button"
-            onClick={() => handleInsert(item)}
-            className="flex aspect-square flex-col items-center justify-center gap-1 rounded-xl border border-stone-100 bg-stone-50 p-1.5 hover:border-violet-200 hover:bg-violet-50/50"
+            onActivate={() => handleInsert(item)}
             title={item.name}
+            aria-label={`Insert ${item.name}`}
+            className={`flex aspect-square flex-col items-center justify-center gap-1 rounded-xl border border-stone-100 bg-stone-50 p-1.5 hover:border-violet-200 hover:bg-violet-50/50${touchChip}`}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
@@ -214,7 +218,7 @@ export function StickersPanel({
             <span className="w-full truncate text-center text-[9px] font-semibold text-stone-600">
               {item.name}
             </span>
-          </button>
+          </CoreChromeAction>
         ))}
       </div>
     </div>

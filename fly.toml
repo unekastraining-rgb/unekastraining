@@ -11,7 +11,7 @@ primary_region = 'iad'
   DATA_DIR = '/data'
   DATABASE_URL = 'file:/data/dev.db'
   AI_PROVIDER = 'gemini'
-  GEMINI_MODEL = 'gemini-3.6-flash'
+  GEMINI_MODEL = 'gemini-2.5-flash'
 
 [http_service]
   internal_port = 3000
